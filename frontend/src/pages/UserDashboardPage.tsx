@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -41,7 +42,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Menu,
-  X
+  X,
+  QrCode
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -123,6 +125,32 @@ export default function UserDashboardPage() {
     }
   }, [activeTab]);
 
+  // Check for expired transactions periodically
+  useEffect(() => {
+    const checkExpiredTransactions = () => {
+      const now = Math.floor(Date.now() / 1000);
+      const updatedHistory = topupHistory.map(transaction => {
+        if ((transaction.status === 'UNPAID' || transaction.status === 'PENDING') && 
+            transaction.expired_time && transaction.expired_time < now) {
+          return { ...transaction, status: 'EXPIRED' };
+        }
+        return transaction;
+      });
+      
+      // Only update if there are changes
+      const hasChanges = updatedHistory.some((transaction, index) => 
+        transaction.status !== topupHistory[index]?.status
+      );
+      
+      if (hasChanges) {
+        setTopupHistory(updatedHistory);
+      }
+    };
+
+    const interval = setInterval(checkExpiredTransactions, 30000); // Check every 30 seconds
+    return () => clearInterval(interval);
+  }, [topupHistory]);
+
   const loadData = async () => {
     try {
       setIsLoading(true);
@@ -160,7 +188,16 @@ export default function UserDashboardPage() {
       const response = await apiService.getTopupHistory();
       
       if (response.data.success && response.data.data) {
-        setTopupHistory(response.data.data);
+        // Check for expired transactions
+        const now = Math.floor(Date.now() / 1000);
+        const updatedTransactions = response.data.data.map((transaction: TopupTransaction) => {
+          if ((transaction.status === 'UNPAID' || transaction.status === 'PENDING') && 
+              transaction.expired_time && transaction.expired_time < now) {
+            return { ...transaction, status: 'EXPIRED' };
+          }
+          return transaction;
+        });
+        setTopupHistory(updatedTransactions);
       }
     } catch (error: any) {
       toast({
@@ -185,11 +222,11 @@ export default function UserDashboardPage() {
   const handleInstallSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!installForm.ip || !installForm.win_ver) {
+    if (!installForm.ip || !installForm.win_ver || !installForm.passwd_vps || !installForm.passwd_rdp) {
       toast({
         variant: 'destructive',
         title: 'Validation Error',
-        description: 'IP address and Windows version are required.',
+        description: 'All fields are required for Windows installation.',
       });
       return;
     }
@@ -497,40 +534,55 @@ export default function UserDashboardPage() {
         </div>
       </header>
 
-      <div className="flex pt-20">
-        {/* Sidebar */}
-        <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-background border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:inset-0 ${
+      <div className="flex">
+        {/* Fixed Sidebar */}
+        <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-background border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}>
-          <div className="flex flex-col h-full pt-20 lg:pt-0">
-            <div className="flex-1 flex flex-col min-h-0 px-4 py-6">
-              <nav className="flex-1 space-y-2">
-                {menuItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeTab === item.id;
-                  
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        setActiveTab(item.id as any);
-                        setSidebarOpen(false);
-                      }}
-                      className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                        isActive
-                          ? 'bg-primary text-primary-foreground'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {item.label}
-                    </button>
-                  );
-                })}
-              </nav>
+          <div className="flex flex-col h-full">
+            {/* Sidebar Header Spacer */}
+            <div className="h-20 border-b flex items-center px-6">
+              <div className="flex items-center gap-3">
+                <div className="w-6 h-6 bg-primary rounded-full flex items-center justify-center">
+                  <Code className="h-3 w-3 text-primary-foreground" />
+                </div>
+                <span className="font-semibold text-sm">Navigation</span>
+              </div>
+            </div>
+
+            {/* Sidebar Content */}
+            <div className="flex-1 flex flex-col min-h-0">
+              <ScrollArea className="flex-1">
+                <div className="px-4 py-6">
+                  <nav className="space-y-2">
+                    {menuItems.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeTab === item.id;
+                      
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setActiveTab(item.id as any);
+                            setSidebarOpen(false);
+                          }}
+                          className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                            isActive
+                              ? 'bg-primary text-primary-foreground'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                          }`}
+                        >
+                          <Icon className="h-4 w-4" />
+                          {item.label}
+                        </button>
+                      );
+                    })}
+                  </nav>
+                </div>
+              </ScrollArea>
               
               {/* Quota Card in Sidebar */}
-              <div className="mt-6">
+              <div className="p-4 border-t">
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-center">
@@ -561,7 +613,7 @@ export default function UserDashboardPage() {
         )}
 
         {/* Main Content */}
-        <main className="flex-1 lg:ml-0">
+        <main className="flex-1 lg:ml-64 pt-20">
           <div className="container mx-auto px-6 py-8">
             {/* Dashboard Tab */}
             {activeTab === 'dashboard' && (
@@ -735,13 +787,14 @@ export default function UserDashboardPage() {
                         </div>
 
                         <div className="space-y-2">
-                          <Label htmlFor="passwd_vps">VPS Password</Label>
+                          <Label htmlFor="passwd_vps">VPS Password *</Label>
                           <Input
                             id="passwd_vps"
                             type="password"
                             placeholder="Enter VPS password"
                             value={installForm.passwd_vps}
                             onChange={(e) => setInstallForm(prev => ({ ...prev, passwd_vps: e.target.value }))}
+                            required
                           />
                         </div>
 
@@ -750,6 +803,7 @@ export default function UserDashboardPage() {
                           <Select
                             value={installForm.win_ver}
                             onValueChange={(value) => setInstallForm(prev => ({ ...prev, win_ver: value }))}
+                            required
                           >
                             <SelectTrigger>
                               <SelectValue placeholder="Select Windows version" />
@@ -765,13 +819,14 @@ export default function UserDashboardPage() {
                         </div>
 
                         <div className="space-y-2">
-                          <Label htmlFor="passwd_rdp">RDP Password</Label>
+                          <Label htmlFor="passwd_rdp">RDP Password *</Label>
                           <Input
                             id="passwd_rdp"
                             type="password"
                             placeholder="Enter RDP password"
                             value={installForm.passwd_rdp}
                             onChange={(e) => setInstallForm(prev => ({ ...prev, passwd_rdp: e.target.value }))}
+                            required
                           />
                         </div>
                       </div>
@@ -826,28 +881,30 @@ export default function UserDashboardPage() {
                       </div>
                     ) : (
                       <>
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>IP Address</TableHead>
-                              <TableHead>Windows Version</TableHead>
-                              <TableHead>Status</TableHead>
-                              <TableHead>Created</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {paginatedInstallHistory.map((install) => (
-                              <TableRow key={install.id}>
-                                <TableCell className="font-mono">{install.ip}</TableCell>
-                                <TableCell>{install.win_ver}</TableCell>
-                                <TableCell>{getStatusBadge(install.status)}</TableCell>
-                                <TableCell>
-                                  {new Date(install.created_at).toLocaleDateString()}
-                                </TableCell>
+                        <ScrollArea className="h-[500px]">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>IP Address</TableHead>
+                                <TableHead>Windows Version</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Created</TableHead>
                               </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
+                            </TableHeader>
+                            <TableBody>
+                              {paginatedInstallHistory.map((install) => (
+                                <TableRow key={install.id}>
+                                  <TableCell className="font-mono">{install.ip}</TableCell>
+                                  <TableCell>{install.win_ver}</TableCell>
+                                  <TableCell>{getStatusBadge(install.status)}</TableCell>
+                                  <TableCell>
+                                    {new Date(install.created_at).toLocaleDateString()}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </ScrollArea>
                         
                         {renderPagination(installHistoryPage, installHistory.length, setInstallHistoryPage)}
                       </>
@@ -882,7 +939,7 @@ export default function UserDashboardPage() {
                 </div>
 
                 <Card>
-                  <CardContent className="p-6">
+                  <CardContent className="p-6 h-[550px]">
                     {isLoadingTopup ? (
                       <div className="flex items-center justify-center py-8">
                         <Loader2 className="h-8 w-8 animate-spin" />
@@ -897,55 +954,57 @@ export default function UserDashboardPage() {
                       </div>
                     ) : (
                       <>
-                        <div className="space-y-3">
-                          {paginatedTopupHistory.map((transaction) => (
-                            <Card key={transaction.id} className="hover:shadow-md transition-shadow">
-                              <CardContent className="p-4">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-3">
-                                    <div className="h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
-                                      <CreditCard className="h-5 w-5 text-primary" />
+                        <ScrollArea className="h-[500px]">
+                          <div className="space-y-3 pr-4">
+                            {paginatedTopupHistory.map((transaction) => (
+                              <Card key={transaction.id} className="hover:shadow-md transition-shadow">
+                                <CardContent className="p-4">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                      <div className="h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
+                                        <CreditCard className="h-5 w-5 text-primary" />
+                                      </div>
+                                      <div>
+                                        <p className="font-medium">{transaction.quantity} Quota Purchase</p>
+                                        <p className="text-sm text-muted-foreground">
+                                          {formatCurrency(transaction.final_amount)}
+                                        </p>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <p className="font-medium">{transaction.quantity} Quota Purchase</p>
-                                      <p className="text-sm text-muted-foreground">
-                                        {formatCurrency(transaction.final_amount)}
-                                      </p>
+                                    <div className="flex items-center gap-2">
+                                      {getTopupStatusBadge(transaction.status)}
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    {getTopupStatusBadge(transaction.status)}
-                                  </div>
-                                </div>
 
-                                <div className="mt-3 flex items-center justify-between">
-                                  <div className="text-sm text-muted-foreground">
-                                    {formatDate(transaction.created_at)}
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => handleViewDetails(transaction)}
-                                    >
-                                      View Details
-                                    </Button>
-                                    {isTransactionPayable(transaction) && (
+                                  <div className="mt-3 flex items-center justify-between">
+                                    <div className="text-sm text-muted-foreground">
+                                      {formatDate(transaction.created_at)}
+                                    </div>
+                                    <div className="flex gap-2">
                                       <Button
+                                        variant="outline"
                                         size="sm"
-                                        onClick={() => handlePayTransaction(transaction)}
-                                        className="bg-green-600 hover:bg-green-700"
+                                        onClick={() => handleViewDetails(transaction)}
                                       >
-                                        <CreditCard className="h-4 w-4 mr-1" />
-                                        Pay
+                                        View Details
                                       </Button>
-                                    )}
+                                      {isTransactionPayable(transaction) && (
+                                        <Button
+                                          size="sm"
+                                          onClick={() => handlePayTransaction(transaction)}
+                                          className="bg-green-600 hover:bg-green-700"
+                                        >
+                                          <CreditCard className="h-4 w-4 mr-1" />
+                                          Pay
+                                        </Button>
+                                      )}
+                                    </div>
                                   </div>
-                                </div>
-                              </CardContent>
-                            </Card>
-                          ))}
-                        </div>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        </ScrollArea>
                         
                         {renderPagination(topupHistoryPage, topupHistory.length, setTopupHistoryPage)}
                       </>
@@ -972,7 +1031,7 @@ export default function UserDashboardPage() {
         }}
       />
 
-      {/* Payment Modal for existing transactions */}
+      {/* Payment Modal for existing transactions with QR Code */}
       {paymentModalData && (
         <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
           <DialogContent className="max-w-md">
@@ -987,18 +1046,29 @@ export default function UserDashboardPage() {
             </DialogHeader>
 
             <div className="space-y-6">
+              {/* QR Code Section */}
               {paymentModalData.qr_url && (
-                <div className="flex justify-center">
-                  <div className="bg-white p-4 rounded-lg border">
-                    <img
-                      src={paymentModalData.qr_url}
-                      alt="Payment QR Code"
-                      className="w-48 h-48 object-contain"
-                    />
+                <div className="text-center">
+                  <div className="flex items-center justify-center gap-2 mb-3">
+                    <QrCode className="h-4 w-4" />
+                    <span className="text-sm font-medium">Scan QR Code to Pay</span>
                   </div>
+                  <div className="flex justify-center">
+                    <div className="bg-white p-4 rounded-lg border">
+                      <img
+                        src={paymentModalData.qr_url}
+                        alt="Payment QR Code"
+                        className="w-48 h-48 object-contain"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Scan with your mobile banking or e-wallet app
+                  </p>
                 </div>
               )}
 
+              {/* Transaction Details */}
               <Card>
                 <CardContent className="pt-4">
                   <div className="space-y-2 text-sm">
@@ -1024,10 +1094,17 @@ export default function UserDashboardPage() {
                         <span className="font-mono">{paymentModalData.pay_code}</span>
                       </div>
                     )}
+                    <div className="flex justify-between">
+                      <span>Expires:</span>
+                      <span className="text-red-600 font-medium">
+                        {new Date(paymentModalData.expired_time * 1000).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
+              {/* Action Buttons */}
               <div className="flex gap-3">
                 <Button
                   variant="outline"
@@ -1105,6 +1182,16 @@ export default function UserDashboardPage() {
                         <span className="font-mono">{selectedTransaction.pay_code}</span>
                       </div>
                     )}
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Expires:</span>
+                      <span className={`font-medium ${
+                        selectedTransaction.expired_time < Math.floor(Date.now() / 1000) 
+                          ? 'text-red-600' 
+                          : 'text-green-600'
+                      }`}>
+                        {new Date(selectedTransaction.expired_time * 1000).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
