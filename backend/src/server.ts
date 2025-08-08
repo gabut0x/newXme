@@ -1,4 +1,5 @@
 // Load environment variables first - before any other imports
+process.env.TZ = 'Asia/Jakarta';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
