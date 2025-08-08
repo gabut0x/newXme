@@ -319,7 +319,7 @@ export default function UserDashboardPage() {
       setPaymentModalData({
         reference: transaction.reference,
         checkout_url: transaction.checkout_url,
-        qr_url: transaction.qr_url || undefined,
+        qr_url: transaction.qr_url || `https://tripay.co.id/qr/${transaction.reference}`,
         pay_code: transaction.pay_code,
         payment_name: transaction.payment_method,
         final_amount: transaction.final_amount,
@@ -368,8 +368,8 @@ export default function UserDashboardPage() {
     if (totalPages <= 1) return null;
 
     return (
-      <div className="flex items-center justify-between mt-6">
-        <p className="text-sm text-muted-foreground">
+      <div className="flex w-full items-center justify-between mt-6">
+        <p className="text-xs text-muted-foreground w-full">
           Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, totalItems)} of {totalItems} entries
         </p>
         
@@ -542,12 +542,6 @@ export default function UserDashboardPage() {
           <div className="flex flex-col h-full">
             {/* Sidebar Header Spacer */}
             <div className="h-20 border-b flex items-center px-6">
-              <div className="flex items-center gap-3">
-                <div className="w-6 h-6 bg-primary rounded-full flex items-center justify-center">
-                  <Code className="h-3 w-3 text-primary-foreground" />
-                </div>
-                <span className="font-semibold text-sm">Navigation</span>
-              </div>
             </div>
 
             {/* Sidebar Content */}
@@ -881,7 +875,7 @@ export default function UserDashboardPage() {
                       </div>
                     ) : (
                       <>
-                        <ScrollArea className="h-[500px]">
+                        <ScrollArea className="h-[440px]">
                           <Table>
                             <TableHeader>
                               <TableRow>
@@ -954,7 +948,7 @@ export default function UserDashboardPage() {
                       </div>
                     ) : (
                       <>
-                        <ScrollArea className="h-[500px]">
+                        <ScrollArea className="h-[440px]">
                           <div className="space-y-3 pr-4">
                             {paginatedTopupHistory.map((transaction) => (
                               <Card key={transaction.id} className="hover:shadow-md transition-shadow">

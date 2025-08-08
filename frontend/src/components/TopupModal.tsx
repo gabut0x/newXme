@@ -548,18 +548,6 @@ export default function TopupModal({ open, onOpenChange, onSuccess }: TopupModal
 
             <div className="flex gap-3">
               <Button
-                variant="outline"
-                onClick={() => {
-                  if (paymentData?.checkout_url) {
-                    window.open(paymentData.checkout_url, '_blank');
-                  }
-                }}
-                className="flex-1"
-              >
-                <CreditCard className="mr-2 h-4 w-4" />
-                Open Payment Page
-              </Button>
-              <Button
                 onClick={() => {
                   setShowQrModal(false);
                   onOpenChange(false);
@@ -567,7 +555,6 @@ export default function TopupModal({ open, onOpenChange, onSuccess }: TopupModal
                 }}
                 className="flex-1"
               >
-                <X className="mr-2 h-4 w-4" />
                 Done
               </Button>
             </div>

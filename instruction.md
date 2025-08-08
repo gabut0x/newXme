@@ -1,1 +1,0 @@
-tolong tambahkan QR image via url : https://tripay.co.id/qr/{reference} pada UserDashboardPage saat user klik button 'Pay' pada halaman 'Topup History'
