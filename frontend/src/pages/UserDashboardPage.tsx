@@ -1107,16 +1107,6 @@ export default function UserDashboardPage() {
               {/* Action Buttons */}
               <div className="flex gap-3">
                 <Button
-                  variant="outline"
-                  onClick={() => {
-                    window.open(paymentModalData.checkout_url, '_blank');
-                  }}
-                  className="flex-1"
-                >
-                  <CreditCard className="mr-2 h-4 w-4" />
-                  Open Payment Page
-                </Button>
-                <Button
                   onClick={() => setShowPaymentModal(false)}
                   className="flex-1"
                 >
