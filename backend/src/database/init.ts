@@ -78,8 +78,8 @@ async function createTables(): Promise<void> {
         admin INTEGER DEFAULT 0,
         telegram VARCHAR(255),
         quota INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (datetime('now','localtime')),
+        updated_at DATETIME DEFAULT (datetime('now','localtime')),
         last_login DATETIME,
         failed_login_attempts INTEGER DEFAULT 0,
         locked_until DATETIME
@@ -104,7 +104,7 @@ async function createTables(): Promise<void> {
         type VARCHAR(20) NOT NULL, -- 'email_verification' or 'password_reset'
         expires_at DATETIME NOT NULL,
         used_at DATETIME,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (datetime('now','localtime')),
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       )
     `);
@@ -117,7 +117,7 @@ async function createTables(): Promise<void> {
         session_token VARCHAR(255) NOT NULL,
         ip_address VARCHAR(45),
         user_agent TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (datetime('now','localtime')),
         expires_at DATETIME NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
@@ -135,8 +135,8 @@ async function createTables(): Promise<void> {
         avatar_url TEXT,
         timezone VARCHAR(50) DEFAULT 'UTC',
         language VARCHAR(10) DEFAULT 'en',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (datetime('now','localtime')),
+        updated_at DATETIME DEFAULT (datetime('now','localtime')),
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       )
     `);
@@ -152,7 +152,7 @@ async function createTables(): Promise<void> {
         ip_address VARCHAR(45),
         user_agent TEXT,
         details TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (datetime('now','localtime')),
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
       )
     `);
@@ -163,8 +163,8 @@ async function createTables(): Promise<void> {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name VARCHAR(255) NOT NULL,
         slug VARCHAR(100) UNIQUE NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT (datetime('now','localtime')),
+        updated_at DATETIME DEFAULT (datetime('now','localtime'))
       )
     `);
 
@@ -176,8 +176,8 @@ async function createTables(): Promise<void> {
         description TEXT,
         price DECIMAL(10,2) NOT NULL,
         image_url TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT (datetime('now','localtime')),
+        updated_at DATETIME DEFAULT (datetime('now','localtime'))
       )
     `);
 
@@ -186,14 +186,14 @@ async function createTables(): Promise<void> {
       CREATE TABLE IF NOT EXISTS install_data (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
-        start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        start_time DATETIME DEFAULT (datetime('now','localtime')),
         ip VARCHAR(45) NOT NULL,
         passwd_vps VARCHAR(255),
         win_ver VARCHAR(10) NOT NULL,
         passwd_rdp VARCHAR(255),
         status VARCHAR(50) NOT NULL DEFAULT 'pending',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (datetime('now','localtime')),
+        updated_at DATETIME DEFAULT (datetime('now','localtime')),
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       )
     `);
@@ -227,8 +227,8 @@ async function createTables(): Promise<void> {
         minimum_fee INTEGER DEFAULT 0,
         maximum_fee INTEGER DEFAULT 0,
         is_enabled BOOLEAN DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT (datetime('now','localtime')),
+        updated_at DATETIME DEFAULT (datetime('now','localtime'))
       )
     `);
     
@@ -248,8 +248,8 @@ async function createTables(): Promise<void> {
         quantity INTEGER NOT NULL,
         total_amount DECIMAL(10,2) NOT NULL,
         payment_method VARCHAR(50),
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT (datetime('now','localtime')),
+        updated_at DATETIME DEFAULT (datetime('now','localtime')),
         paid_at DATETIME,
         FOREIGN KEY (uid) REFERENCES users (id) ON DELETE CASCADE
       )
@@ -297,8 +297,8 @@ async function createTopupTransactionsTable(): Promise<void> {
           pay_code VARCHAR(255),
           status VARCHAR(50) NOT NULL DEFAULT 'UNPAID',
           expired_time INTEGER,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          created_at DATETIME DEFAULT (datetime('now','localtime')),
+          updated_at DATETIME DEFAULT (datetime('now','localtime')),
           paid_at DATETIME,
           FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
@@ -330,8 +330,8 @@ async function createTopupTransactionsTable(): Promise<void> {
             pay_code VARCHAR(255),
             status VARCHAR(50) NOT NULL DEFAULT 'UNPAID',
             expired_time INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT (datetime('now','localtime')),
+            updated_at DATETIME DEFAULT (datetime('now','localtime')),
             paid_at DATETIME,
             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
           )
@@ -407,8 +407,8 @@ async function createTopupTransactionsTable(): Promise<void> {
             pay_code VARCHAR(255),
             status VARCHAR(50) NOT NULL DEFAULT 'UNPAID',
             expired_time INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT (datetime('now','localtime')),
+            updated_at DATETIME DEFAULT (datetime('now','localtime')),
             paid_at DATETIME,
             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
           )
