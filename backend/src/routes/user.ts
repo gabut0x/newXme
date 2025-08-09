@@ -13,7 +13,7 @@ import { auditLogger } from '../middleware/security.js';
 import { updateProfileSchema, installDataSchema, ApiResponse } from '../types/user.js';
 import { UserService } from '../services/userService.js';
 import { logger } from '../utils/logger.js';
-import { NotFoundError } from '../middleware/errorHandler.js';
+import { NotFoundError, BadRequestError } from '../middleware/errorHandler.js';
 import { z } from 'zod';
 import { tripayService } from '../services/tripayService.js';
 import { DateUtils } from '../utils/dateUtils.js';
@@ -792,7 +792,6 @@ router.delete('/account',
   })
 );
 
-export { router as userRoutes };
 // Get enabled payment methods for users
 router.get('/payment-methods/enabled', 
   authenticateToken,
@@ -851,9 +850,9 @@ router.get('/payment-methods/enabled',
                 channel.fee_customer?.flat || 0,
                 channel.fee_customer?.percent || 0,
                 channel.minimum_fee || 0,
-                channel.maximum_fee || 0
+                channel.maximum_fee || 0,
                 DateUtils.nowSQLite(),
-                DateUtils.nowSQLite()
+                DateUtils.nowSQLite(),
                 DateUtils.nowSQLite(),
                 DateUtils.nowSQLite()
               ]
@@ -888,3 +887,5 @@ router.get('/payment-methods/enabled',
     }
   })
 );
+
+export { router as userRoutes };

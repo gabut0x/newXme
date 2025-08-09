@@ -1,3 +1,4 @@
+// src/middleware/admin.ts
 import { Request, Response, NextFunction } from 'express';
 import { getDatabase } from '../database/init.js';
 import { logger } from '../utils/logger.js';
@@ -9,7 +10,7 @@ export interface AuthenticatedRequest extends Request {
     username: string;
     email: string;
     isVerified: boolean;
-    admin: number;
+    admin: number; // 1 = admin, 0 = non-admin
   };
 }
 
@@ -29,11 +30,17 @@ export async function requireAdmin(
     }
 
     if (req.user.admin !== 1) {
-      logger.warn(`Non-admin user ${req.user.username} attempted to access admin endpoint`);
-        userId: req.user.id,
-        ip: req.ip,
-        path: req.path,
-        method: req.method
+      // ⬇️ masalahnya di sini sebelumnya — properti lepas tanpa objek
+      logger.warn(
+        `Non-admin user ${req.user.username} attempted to access admin endpoint`,
+        {
+          userId: req.user.id,
+          ip: req.ip,
+          path: req.path,
+          method: req.method,
+        }
+      );
+
       res.status(403).json({
         success: false,
         message: 'Admin access required',
@@ -43,7 +50,7 @@ export async function requireAdmin(
     }
 
     // Log admin access for audit
-    DatabaseSecurity.logDatabaseOperation('ADMIN_ACCESS', req.path, req.user.id);
+    await DatabaseSecurity.logDatabaseOperation('ADMIN_ACCESS', req.path, req.user.id);
     next();
   } catch (error) {
     logger.error('Admin middleware error:', error);
@@ -57,17 +64,14 @@ export async function requireAdmin(
 
 export async function checkAdminStatus(userId: number): Promise<boolean> {
   try {
-    // Validate user ID
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return false;
-    }
+    if (!Number.isInteger(userId) || userId <= 0) return false;
 
     const db = getDatabase();
-    const user = await db.get(
+    const user = await db.get<{ admin: number }>(
       'SELECT admin FROM users WHERE id = ? AND is_active = 1',
       [userId]
     );
-    
+
     return user?.admin === 1;
   } catch (error) {
     logger.error('Error checking admin status:', error);
