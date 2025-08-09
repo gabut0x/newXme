@@ -490,12 +490,12 @@ export default function UserDashboardPage() {
               <Code className="h-4 w-4 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-bold">XME Projects</h1>
+              <h1 className="text-md md:text-xl font-bold">XME Projects</h1>
               <p className="text-sm text-muted-foreground hidden sm:block">User Dashboard</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 md:gap-4">
             <ThemeToggle />
             <Button variant="ghost" size="sm">
               <Bell className="h-4 w-4" />
@@ -515,10 +515,6 @@ export default function UserDashboardPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem className="cursor-pointer">
-                  <User className="h-4 w-4 mr-2" />
-                  Profile Settings
-                </DropdownMenuItem>
                 <DropdownMenuItem className="cursor-pointer">
                   <Settings className="h-4 w-4 mr-2" />
                   Account Settings
@@ -611,15 +607,15 @@ export default function UserDashboardPage() {
           <div className="container mx-auto px-6 py-8">
             {/* Dashboard Tab */}
             {activeTab === 'dashboard' && (
-              <div className="space-y-8">
+              <div className="space-y-6">
                 {/* Welcome Section */}
                 <div className="mb-8">
                   <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h2 className="text-3xl font-bold text-foreground">
+                      <h2 className="text-2xl md:text-3xl font-bold text-foreground">
                         Welcome back, {user.profile?.first_name || user.username}!
                       </h2>
-                      <p className="text-muted-foreground">
+                      <p className="text-xs md:text-sm text-muted-foreground">
                         Manage your Windows installations
                       </p>
                     </div>
@@ -665,12 +661,12 @@ export default function UserDashboardPage() {
                 </div>
 
                 {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                   <Card>
                     <CardContent className="p-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-medium text-muted-foreground">Total Installs</p>
+                          <p className="text-xs md:text-sm font-medium text-muted-foreground">Total Installs</p>
                           <p className="text-2xl font-bold text-foreground">{dashboardData.stats.totalVPS}</p>
                         </div>
                         <div className="h-12 w-12 bg-primary/10 rounded-lg flex items-center justify-center">
@@ -684,7 +680,7 @@ export default function UserDashboardPage() {
                     <CardContent className="p-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-medium text-muted-foreground">Active Installs</p>
+                          <p className="text-xs md:text-sm font-medium text-muted-foreground">Active Installs</p>
                           <p className="text-2xl font-bold text-foreground">{dashboardData.stats.activeConnections}</p>
                         </div>
                         <div className="h-12 w-12 bg-green-500/10 rounded-lg flex items-center justify-center">
@@ -694,11 +690,11 @@ export default function UserDashboardPage() {
                     </CardContent>
                   </Card>
 
-                  <Card>
+                  <Card className='col-span-2 md:col-span-1'>
                     <CardContent className="p-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-medium text-muted-foreground">Success Rate</p>
+                          <p className="text-xs md:text-sm font-medium text-muted-foreground">Success Rate</p>
                           <p className="text-2xl font-bold text-foreground">95%</p>
                         </div>
                         <div className="h-12 w-12 bg-purple-500/10 rounded-lg flex items-center justify-center">
@@ -727,7 +723,7 @@ export default function UserDashboardPage() {
                         </div>
                         <div>
                           <p className="font-medium">Install Windows</p>
-                          <p className="text-sm text-muted-foreground">Create new installation</p>
+                          <p className="text-xs md:text-sm text-muted-foreground">Create new installation</p>
                         </div>
                       </Button>
                       
@@ -741,7 +737,7 @@ export default function UserDashboardPage() {
                         </div>
                         <div>
                           <p className="font-medium">Topup Quota</p>
-                          <p className="text-sm text-muted-foreground">Add more quota</p>
+                          <p className="text-xs md:text-sm text-muted-foreground">Add more quota</p>
                         </div>
                       </Button>
                     </div>
@@ -755,7 +751,7 @@ export default function UserDashboardPage() {
               <div className="space-y-6">
                 <div>
                   <h2 className="text-2xl font-bold text-foreground mb-2">Install Windows</h2>
-                  <p className="text-muted-foreground">Create a new Windows installation on your VPS</p>
+                  <p className="text-xs md:text-sm text-muted-foreground">Create a new Windows installation on your VPS</p>
                 </div>
 
                 <Card>
@@ -850,7 +846,7 @@ export default function UserDashboardPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-2xl font-bold text-foreground mb-2">Install History</h2>
-                    <p className="text-muted-foreground">View your Windows installation history</p>
+                    <p className="text-xs md:text-sm text-muted-foreground">View your Windows installation history</p>
                   </div>
                   <Button onClick={loadData} variant="outline">
                     <Loader2 className="h-4 w-4 mr-2" />
@@ -914,7 +910,7 @@ export default function UserDashboardPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-2xl font-bold text-foreground mb-2">Topup History</h2>
-                    <p className="text-muted-foreground">View your quota topup transaction history</p>
+                    <p className="text-xs md:text-sm text-muted-foreground">View your quota topup transaction history</p>
                   </div>
                   <div className="flex gap-2">
                     <Button 
@@ -971,7 +967,7 @@ export default function UserDashboardPage() {
                                   </div>
 
                                   <div className="mt-3 flex items-center justify-between">
-                                    <div className="text-sm text-muted-foreground">
+                                    <div className="text-xs md:text-sm text-muted-foreground">
                                       {formatDate(transaction.created_at)}
                                     </div>
                                     <div className="flex gap-2">
@@ -1080,7 +1076,7 @@ export default function UserDashboardPage() {
                     </div>
                     <div className="flex justify-between">
                       <span>Status:</span>
-                      <Badge variant="secondary">{paymentModalData.status}</Badge>
+                      {getTopupStatusBadge(paymentModalData.status)}
                     </div>
                     {paymentModalData.pay_code && (
                       <div className="flex justify-between">
@@ -1168,11 +1164,7 @@ export default function UserDashboardPage() {
                     )}
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Expires:</span>
-                      <span className={`font-medium ${
-                        selectedTransaction.expired_time < Math.floor(Date.now() / 1000) 
-                          ? 'text-red-600' 
-                          : 'text-green-600'
-                      }`}>
+                      <span className="font-medium text-red-600">
                         {new Date(selectedTransaction.expired_time * 1000).toLocaleString()}
                       </span>
                     </div>

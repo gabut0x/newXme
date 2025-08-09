@@ -203,7 +203,7 @@ class TripayService {
 
       const response = await axios.get(`${this.baseUrl}/merchant/payment-channel`, {
         headers: {
-          'Authorization': `Bearer ${this.apiKey}`
+          'Authorization': `Bearer ${this.apiKey}`          
         },
         validateStatus: function (status) {
           return status < 999; // Accept all HTTP status codes

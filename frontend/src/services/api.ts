@@ -440,7 +440,11 @@ class ApiService {
   }
 
   async syncPaymentMethods(): Promise<AxiosResponse<ApiResponse<{ totalFromTripay: number; syncedCount: number; newCount: number }>>> {
-    return this.api.post('/admin/payment-methods/sync');
+    return this.api.post(
+      '/admin/payment-methods/sync',
+      {}, // body kosong
+      { headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   // Utility methods

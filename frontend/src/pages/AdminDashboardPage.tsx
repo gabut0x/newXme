@@ -742,7 +742,7 @@ export default function AdminDashboardPage() {
                   {products.map((product) => (
                     <TableRow key={product.id}>
                       <TableCell className="font-medium">{product.name}</TableCell>
-                      <TableCell>${product.price}</TableCell>
+                      <TableCell>{product.price} IDR</TableCell>
                       <TableCell>{new Date(product.created_at).toLocaleDateString()}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
