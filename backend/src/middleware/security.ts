@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AuthUtils } from '../utils/auth.js';
 import { logger } from '../utils/logger.js';
 import { ApiResponse } from '../types/user.js';
+import { DateUtils } from '../utils/dateUtils.js';
 
 /**
  * Enhanced security middleware collection
@@ -202,7 +203,8 @@ export function auditLogger(action: string) {
         path: req.path,
         statusCode: res.statusCode,
         duration: `${duration}ms`,
-        timestamp: new Date().toISOString()
+        timestamp: DateUtils.nowISO(),
+        jakartaTime: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       });
     });
 

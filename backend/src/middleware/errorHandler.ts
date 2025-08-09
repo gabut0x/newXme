@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger.js';
 import { ApiResponse } from '../types/user.js';
+import { DateUtils } from '../utils/dateUtils.js';
 
 export interface AppError extends Error {
   statusCode?: number;
@@ -17,7 +18,8 @@ export function errorHandler(error: AppError, req: Request, res: Response, next:
     method: req.method,
     ip: req.ip,
     userAgent: req.get('User-Agent'),
-    userId: req.user?.id || 'anonymous'
+    userId: req.user?.id || 'anonymous',
+    timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
   });
 
   // Default error values

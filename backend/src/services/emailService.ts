@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { logger } from '../utils/logger.js';
+import { DateUtils } from '../utils/dateUtils.js';
 
 export interface EmailOptions {
   to: string;
@@ -97,7 +98,8 @@ export class EmailService {
       logger.info('Email sent successfully:', {
         messageId: info.messageId,
         to: options.to,
-        subject: options.subject
+        subject: options.subject,
+        sentAt: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       });
     } catch (error) {
       logger.error('Failed to send email:', error);

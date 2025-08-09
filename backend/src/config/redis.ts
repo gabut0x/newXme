@@ -1,5 +1,6 @@
 import { createClient, RedisClientType } from 'redis';
 import { logger } from '../utils/logger.js';
+import { DateUtils } from '../utils/dateUtils.js';
 
 let redisClient: RedisClientType | null = null;
 
@@ -59,11 +60,19 @@ export class SessionManager {
   
   static async createSession(userId: number, sessionData: any, expirationSeconds: number = 86400): Promise<string> {
     const client = getRedisClient();
-    const sessionId = `${userId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const jakartaTimestamp = DateUtils.getJakartaUnixTimestamp();
+    const sessionId = `${userId}_${jakartaTimestamp}_${Math.random().toString(36).substr(2, 9)}`;
     const sessionKey = `${this.SESSION_PREFIX}${sessionId}`;
     const userSessionsKey = `${this.USER_SESSIONS_PREFIX}${userId}`;
     
-    await client.setEx(sessionKey, expirationSeconds, JSON.stringify(sessionData));
+    // Add Jakarta timestamp to session data
+    const sessionDataWithTime = {
+      ...sessionData,
+      createdAt: DateUtils.nowISO(),
+      jakartaTime: DateUtils.formatJakarta(DateUtils.now())
+    };
+    
+    await client.setEx(sessionKey, expirationSeconds, JSON.stringify(sessionDataWithTime));
     await client.sAdd(userSessionsKey, sessionId);
     await client.expire(userSessionsKey, expirationSeconds);
     
@@ -82,7 +91,14 @@ export class SessionManager {
     const client = getRedisClient();
     const sessionKey = `${this.SESSION_PREFIX}${sessionId}`;
     
-    await client.setEx(sessionKey, expirationSeconds, JSON.stringify(sessionData));
+    // Add Jakarta timestamp to session data
+    const sessionDataWithTime = {
+      ...sessionData,
+      updatedAt: DateUtils.nowISO(),
+      jakartaTime: DateUtils.formatJakarta(DateUtils.now())
+    };
+    
+    await client.setEx(sessionKey, expirationSeconds, JSON.stringify(sessionDataWithTime));
   }
   
   static async deleteSession(sessionId: string): Promise<void> {
@@ -144,7 +160,7 @@ export class RateLimiter {
     const rateLimitKey = `${this.RATE_LIMIT_PREFIX}${key}`;
     
     const current = await client.get(rateLimitKey);
-    const now = Date.now();
+    const now = DateUtils.getJakartaUnixTimestamp() * 1000; // Convert to milliseconds
     
     if (!current) {
       await client.setEx(rateLimitKey, windowSeconds, '1');

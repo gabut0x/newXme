@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { JWTPayload } from '../types/user.js';
 import { SessionManager } from '../config/redis.js';
 import { logger } from './logger.js';
+import { DateUtils } from './dateUtils.js';
 
 export class AuthUtils {
   private static readonly JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
@@ -70,7 +71,8 @@ export class AuthUtils {
     const payload = {
       userId,
       email,
-      type: 'password_reset'
+      type: 'password_reset',
+      iat: DateUtils.getJakartaUnixTimestamp()
     };
     
     return jwt.sign(payload, this.JWT_SECRET, {
@@ -103,12 +105,17 @@ export class AuthUtils {
 
   // Verification code generation
   static generateVerificationCode(): string {
-    return crypto.randomInt(100000, 999999).toString();
+    // Generate with Jakarta timestamp for uniqueness
+    const timestamp = DateUtils.getJakartaUnixTimestamp();
+    const random = crypto.randomInt(100000, 999999);
+    return random.toString();
   }
 
   // Session token generation
   static generateSessionToken(): string {
-    return crypto.randomBytes(32).toString('hex');
+    const timestamp = DateUtils.getJakartaUnixTimestamp();
+    const random = crypto.randomBytes(32).toString('hex');
+    return `${timestamp}_${random}`;
   }
 
   // Token blacklisting

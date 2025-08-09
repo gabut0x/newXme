@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import axios from 'axios';
 import { logger } from '../utils/logger.js';
+import { DateUtils } from '../utils/dateUtils.js';
 
 export interface TripayTransactionRequest {
   method: string;
@@ -129,7 +130,7 @@ class TripayService {
   }
 
   generateMerchantRef(userId: number, quantity: number): string {
-    const timestamp = Date.now();
+    const timestamp = DateUtils.getJakartaUnixTimestamp();
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     return `INV${timestamp}${random}_U${userId}_Q${quantity}`;
   }
@@ -153,7 +154,8 @@ class TripayService {
         merchant_ref: request.merchant_ref,
         amount: request.amount,
         method: request.method,
-        environment: this.isProduction ? 'production' : 'sandbox'
+        environment: this.isProduction ? 'production' : 'sandbox',
+        jakartaTime: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       });
 
       // Use environment-appropriate endpoint
@@ -177,7 +179,8 @@ class TripayService {
 
       logger.info('Tripay transaction created successfully:', {
         reference: response.data.data.reference,
-        checkout_url: response.data.data.checkout_url
+        checkout_url: response.data.data.checkout_url,
+        jakartaTime: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       });
 
       return response.data;

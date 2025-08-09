@@ -4,6 +4,7 @@ import { UserService } from '../services/userService.js';
 import { RateLimiter } from '../config/redis.js';
 import { logger } from '../utils/logger.js';
 import { ApiResponse } from '../types/user.js';
+import { DateUtils } from '../utils/dateUtils.js';
 
 // Extend Express Request interface to include user
 declare global {
@@ -14,7 +15,8 @@ declare global {
         username: string;
         email: string;
         isVerified: boolean;
-        admin?: number;
+        userId,
+        jakartaTime: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       };
     }
   }
