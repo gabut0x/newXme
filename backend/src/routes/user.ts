@@ -115,7 +115,7 @@ router.post('/payment/callback',
       // Update transaction status
       await db.run(`
         UPDATE topup_transactions 
-        SET status = ?, paid_at = ?, updated_at = CURRENT_TIMESTAMP
+        SET status = ?, paid_at = ?, updated_at = datetime('now','localtime')
         WHERE reference = ?
       `, [
         callbackData.status,
@@ -175,7 +175,7 @@ router.put('/profile',
       // Update existing profile
       await db.run(`
         UPDATE user_profiles 
-        SET first_name = ?, last_name = ?, phone = ?, timezone = ?, language = ?, updated_at = CURRENT_TIMESTAMP
+        SET first_name = ?, last_name = ?, phone = ?, timezone = ?, language = ?, updated_at = datetime('now','localtime')
         WHERE user_id = ?
       `, [
         validatedData.firstName || null,
@@ -577,7 +577,7 @@ router.post('/topup',
       await db.run(`
         UPDATE topup_transactions 
         SET reference = ?, payment_url = ?, checkout_url = ?, pay_code = ?, 
-            status = ?, expired_time = ?, updated_at = CURRENT_TIMESTAMP
+            status = ?, expired_time = ?, updated_at = datetime('now','localtime')
         WHERE id = ?
       `, [
         tripayResponse.data.reference,
@@ -623,7 +623,7 @@ router.post('/topup',
       // Update transaction status to failed
       await db.run(`
         UPDATE topup_transactions 
-        SET status = 'FAILED', updated_at = CURRENT_TIMESTAMP 
+        SET status = 'FAILED', updated_at = datetime('now','localtime') 
         WHERE id = ?
       `, [result.lastID]);
 
@@ -780,7 +780,7 @@ router.get('/payment-methods/enabled',
             await db.run(
               `UPDATE payment_methods 
                SET name = ?, type = ?, icon_url = ?, fee_flat = ?, fee_percent = ?, 
-                   minimum_fee = ?, maximum_fee = ?, updated_at = CURRENT_TIMESTAMP 
+                   minimum_fee = ?, maximum_fee = ?, updated_at = datetime('now','localtime') 
                WHERE code = ?`,
               [
                 channel.name,
