@@ -22,6 +22,17 @@ import rateLimit from 'express-rate-limit';
 
 import { errorHandler } from './middleware/errorHandler.js';
 import { notFoundHandler } from './middleware/notFoundHandler.js';
+import { 
+  securityHeaders, 
+  requestLogger, 
+  sqlInjectionProtection,
+  validateContentType,
+  requestSizeLimit
+} from './middleware/auth.js';
+import { 
+  bruteForceProtection,
+  requestTimeout
+} from './middleware/security.js';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/user.js';
 import adminRoutes from './routes/admin.js';
@@ -34,7 +45,14 @@ import { emailService } from './services/emailService.js';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Request timeout protection
+app.use(requestTimeout(30000)); // 30 seconds
+
+// Request size limiting
+app.use(requestSizeLimit(10 * 1024 * 1024)); // 10MB
+
 // Security middleware
+app.use(securityHeaders);
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
   contentSecurityPolicy: {
@@ -43,21 +61,40 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
     },
   },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
 }));
+
+// Brute force protection
+app.use(bruteForceProtection(10, 15)); // 10 attempts per 15 minutes
 
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '1000'), // Increased for development
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'), // Reduced for security
   message: {
     error: 'Too many requests from this IP, please try again later.',
   },
   standardHeaders: true,
   legacyHeaders: false,
   // Skip rate limiting for OPTIONS requests
-  skip: (req) => req.method === 'OPTIONS'
+  skip: (req) => req.method === 'OPTIONS',
+  // Enhanced rate limiting with user tracking
+  keyGenerator: (req) => {
+    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    const userId = req.user?.id || 'anonymous';
+    return `${ip}:${userId}`;
+  }
 });
 
 app.use(limiter);
@@ -132,13 +169,46 @@ if (process.env.NODE_ENV === 'development') {
 
 // General middleware
 app.use(compression());
-app.use(morgan('combined'));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(morgan('combined', {
+  stream: {
+    write: (message: string) => {
+      logger.info(message.trim());
+    }
+  }
+}));
+
+// Content-Type validation for POST/PUT requests
+app.use(validateContentType(['application/json', 'multipart/form-data']));
+
+app.use(express.json({ 
+  limit: '10mb',
+  strict: true, // Only parse arrays and objects
+  type: 'application/json'
+}));
+app.use(express.urlencoded({ 
+  extended: true, 
+  limit: '10mb',
+  parameterLimit: 100 // Limit number of parameters
+}));
 app.use(cookieParser());
 
+// Request logging with security monitoring
+app.use(requestLogger);
+
+// SQL injection protection
+app.use(sqlInjectionProtection);
+
 // Serve static files for uploads
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
+  maxAge: '1d',
+  etag: false,
+  lastModified: false,
+  setHeaders: (res, path) => {
+    // Security headers for static files
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+  }
+}));
 
 // Health check endpoint
 app.get('/health', (req, res) => {

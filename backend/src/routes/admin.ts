@@ -4,10 +4,13 @@ import {
   authenticateToken, 
   requireVerifiedUser,
   validateRequest,
-  asyncHandler
+  asyncHandler,
+  validateNumericId,
+  sqlInjectionProtection
 } from '../middleware/auth.js';
 import { requireAdmin, AuthenticatedRequest } from '../middleware/admin.js';
 import { uploadProductImage } from '../middleware/upload.js';
+import { auditLogger } from '../middleware/security.js';
 import { windowsVersionSchema, productSchema } from '../types/user.js';
 import { logger } from '../utils/logger.js';
 import { tripayService } from '../services/tripayService.js';
@@ -15,6 +18,8 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { DateUtils } from '../utils/dateUtils.js';
+import { DatabaseSecurity } from '../utils/dbSecurity.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,9 +29,12 @@ const router = express.Router();
 // Apply authentication and admin middleware to all routes
 router.use(authenticateToken);
 router.use(requireAdmin);
+router.use(sqlInjectionProtection);
 
 // Windows Versions Routes
-router.get('/windows-versions', asyncHandler(async (req: Request, res: Response) => {
+router.get('/windows-versions', 
+  auditLogger('ADMIN_GET_WINDOWS_VERSIONS'),
+  asyncHandler(async (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     const versions = await db.all('SELECT * FROM windows_versions ORDER BY created_at DESC');
@@ -46,10 +54,16 @@ router.get('/windows-versions', asyncHandler(async (req: Request, res: Response)
   }
 }));
 
-router.post('/windows-versions', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/windows-versions', 
+  validateRequest(windowsVersionSchema),
+  auditLogger('ADMIN_CREATE_WINDOWS_VERSION'),
+  async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const validatedData = windowsVersionSchema.parse(req.body);
+    const validatedData = req.body; // Already validated by middleware
     const db = getDatabase();
+    
+    // Log creation attempt
+    DatabaseSecurity.logDatabaseOperation('CREATE_WINDOWS_VERSION', 'windows_versions', req.user?.id, validatedData);
     
     // Check if slug already exists
     const existing = await db.get('SELECT id FROM windows_versions WHERE slug = ?', [validatedData.slug]);
@@ -75,15 +89,6 @@ router.post('/windows-versions', async (req: AuthenticatedRequest, res: Response
       data: newVersion
     });
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation error',
-        error: error.errors[0].message
-      });
-      return;
-    }
-    
     logger.error('Error creating windows version:', error);
     res.status(500).json({
       success: false,
@@ -93,11 +98,18 @@ router.post('/windows-versions', async (req: AuthenticatedRequest, res: Response
   }
 });
 
-router.put('/windows-versions/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.put('/windows-versions/:id', 
+  validateNumericId('id'),
+  validateRequest(windowsVersionSchema),
+  auditLogger('ADMIN_UPDATE_WINDOWS_VERSION'),
+  async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { id } = req.params;
-    const validatedData = windowsVersionSchema.parse(req.body);
+    const id = parseInt(req.params.id);
+    const validatedData = req.body; // Already validated by middleware
     const db = getDatabase();
+    
+    // Log update attempt
+    DatabaseSecurity.logDatabaseOperation('UPDATE_WINDOWS_VERSION', 'windows_versions', req.user?.id, { id, ...validatedData });
     
     // Check if version exists
     const existing = await db.get('SELECT id FROM windows_versions WHERE id = ?', [id]);
@@ -134,15 +146,6 @@ router.put('/windows-versions/:id', async (req: AuthenticatedRequest, res: Respo
       data: updatedVersion
     });
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation error',
-        error: error.errors[0].message
-      });
-      return;
-    }
-    
     logger.error('Error updating windows version:', error);
     res.status(500).json({
       success: false,
@@ -152,10 +155,16 @@ router.put('/windows-versions/:id', async (req: AuthenticatedRequest, res: Respo
   }
 });
 
-router.delete('/windows-versions/:id', async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/windows-versions/:id', 
+  validateNumericId('id'),
+  auditLogger('ADMIN_DELETE_WINDOWS_VERSION'),
+  async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = parseInt(req.params.id);
     const db = getDatabase();
+    
+    // Log deletion attempt
+    DatabaseSecurity.logDatabaseOperation('DELETE_WINDOWS_VERSION', 'windows_versions', req.user?.id, { id });
     
     // Check if version exists
     const existing = await db.get('SELECT id FROM windows_versions WHERE id = ?', [id]);

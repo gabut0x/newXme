@@ -211,7 +211,17 @@ export class AuthUtils {
 
   // Sanitize user input
   static sanitizeInput(input: string): string {
-    return input.trim().replace(/[<>]/g, '');
+    if (typeof input !== 'string') {
+      return '';
+    }
+    
+    return input
+      .trim()
+      .replace(/[<>]/g, '') // Remove HTML brackets
+      .replace(/javascript:/gi, '') // Remove javascript: protocol
+      .replace(/on\w+=/gi, '') // Remove event handlers
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') // Remove control characters
+      .substring(0, 1000); // Limit length to prevent DoS
   }
 
   // Generate CSRF token

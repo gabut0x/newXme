@@ -78,9 +78,15 @@ export const productSchema = z.object({
 
 // InstallData validation schemas
 export const installDataSchema = z.object({
-  ip: z.string().min(1, 'IP address is required').max(45, 'IP address must be less than 45 characters'),
+  ip: z.string()
+    .min(1, 'IP address is required')
+    .max(45, 'IP address must be less than 45 characters')
+    .regex(/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/, 'Invalid IPv4 address format'),
   passwd_vps: z.string().max(255, 'VPS password must be less than 255 characters').optional(),
-  win_ver: z.string().min(1, 'Windows version is required').max(10, 'Windows version must be less than 10 characters'),
+  win_ver: z.string()
+    .min(1, 'Windows version is required')
+    .max(10, 'Windows version must be less than 10 characters')
+    .regex(/^[a-z0-9-_]+$/, 'Windows version can only contain lowercase letters, numbers, hyphens, and underscores'),
   passwd_rdp: z.string().max(255, 'RDP password must be less than 255 characters').optional(),
 });
 

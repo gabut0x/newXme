@@ -3,6 +3,8 @@ import { User, UserProfile, VerificationCode, PublicUser } from '../types/user.j
 import { AuthUtils } from '../utils/auth.js';
 import { logger } from '../utils/logger.js';
 import { ConflictError, NotFoundError, BadRequestError } from '../middleware/errorHandler.js';
+import { DateUtils } from '../utils/dateUtils.js';
+import { DatabaseSecurity } from '../utils/dbSecurity.js';
 
 export class UserService {
   // User CRUD operations
@@ -14,6 +16,16 @@ export class UserService {
     const db = getDatabase();
     
     try {
+      // Validate input parameters
+      if (!userData.username || !userData.email || !userData.password) {
+        throw new BadRequestError('Missing required fields');
+      }
+
+      // Additional security validation
+      if (userData.username.length > 50 || userData.email.length > 255) {
+        throw new BadRequestError('Input exceeds maximum length');
+      }
+
       // Check if user already exists
       const existingUser = await db.get(
         'SELECT id FROM users WHERE username = ? OR email = ?',
@@ -38,6 +50,8 @@ export class UserService {
         throw new Error('Failed to create user');
       }
 
+      // Log user creation for audit
+      DatabaseSecurity.logDatabaseOperation('CREATE_USER', 'users', result.lastID);
       // Create user profile
       await db.run(
         `INSERT INTO user_profiles (user_id) VALUES (?)`,
@@ -67,6 +81,11 @@ export class UserService {
     const db = getDatabase();
     
     try {
+      // Validate ID parameter
+      if (!Number.isInteger(id) || id <= 0) {
+        throw new BadRequestError('Invalid user ID');
+      }
+
       const user = await db.get(
         'SELECT * FROM users WHERE id = ? AND is_active = 1',
         [id]
@@ -83,6 +102,11 @@ export class UserService {
     const db = getDatabase();
     
     try {
+      // Validate and sanitize username
+      if (!username || typeof username !== 'string' || username.length > 50) {
+        return null;
+      }
+
       const user = await db.get(
         'SELECT * FROM users WHERE username = ? AND is_active = 1',
         [username]
@@ -99,6 +123,11 @@ export class UserService {
     const db = getDatabase();
     
     try {
+      // Validate and sanitize email
+      if (!email || typeof email !== 'string' || email.length > 255) {
+        return null;
+      }
+
       const user = await db.get(
         'SELECT * FROM users WHERE email = ? AND is_active = 1',
         [email]

@@ -5,26 +5,36 @@ import {
   authenticateToken, 
   requireVerifiedUser,
   validateRequest,
-  asyncHandler
+  asyncHandler,
+  validateNumericId,
+  sqlInjectionProtection
 } from '../middleware/auth.js';
+import { auditLogger } from '../middleware/security.js';
 import { updateProfileSchema, installDataSchema, ApiResponse } from '../types/user.js';
 import { UserService } from '../services/userService.js';
 import { logger } from '../utils/logger.js';
 import { NotFoundError } from '../middleware/errorHandler.js';
 import { z } from 'zod';
 import { tripayService } from '../services/tripayService.js';
+import { DateUtils } from '../utils/dateUtils.js';
+import { DatabaseSecurity } from '../utils/dbSecurity.js';
 
 const router = express.Router();
 
+// Apply security middleware to all routes
+router.use(sqlInjectionProtection);
 // Get user profile
 router.get('/profile',
   authenticateToken,
+  auditLogger('GET_PROFILE'),
   asyncHandler(async (req: Request, res: Response) => {
     if (!req.user) {
       throw new NotFoundError('User not found');
     }
 
     const db = getDatabase();
+    
+    // Use parameterized query to prevent SQL injection
     const user = await db.get(`
       SELECT u.id, u.username, u.email, u.is_verified, u.admin, u.telegram, u.quota, u.created_at, u.last_login,
              p.first_name, p.last_name, p.phone, p.avatar_url, p.timezone, p.language, p.created_at as profile_created_at
@@ -37,6 +47,8 @@ router.get('/profile',
       throw new NotFoundError('User not found');
     }
 
+    // Log profile access for audit
+    DatabaseSecurity.logDatabaseOperation('READ_PROFILE', 'users', req.user.id);
     // Format the response
     const profile = user.first_name ? {
       id: user.id,
@@ -160,6 +172,7 @@ router.put('/profile',
   authenticateToken,
   requireVerifiedUser,
   validateRequest(updateProfileSchema),
+  auditLogger('UPDATE_PROFILE'),
   asyncHandler(async (req: Request, res: Response) => {
     if (!req.user) {
       throw new NotFoundError('User not found');
@@ -168,6 +181,8 @@ router.put('/profile',
     const validatedData = req.body;
     const db = getDatabase();
 
+    // Log profile update attempt
+    DatabaseSecurity.logDatabaseOperation('UPDATE_PROFILE', 'user_profiles', req.user.id, validatedData);
     // Check if profile exists
     const existingProfile = await db.get('SELECT id FROM user_profiles WHERE user_id = ?', [req.user.id]);
 
@@ -360,6 +375,7 @@ router.post('/install',
   authenticateToken,
   requireVerifiedUser,
   validateRequest(installDataSchema),
+  auditLogger('CREATE_INSTALL'),
   asyncHandler(async (req: Request, res: Response) => {
     if (!req.user) {
       throw new NotFoundError('User not found');
@@ -368,6 +384,16 @@ router.post('/install',
     const validatedData = req.body;
     const db = getDatabase();
 
+    // Additional security validation for install data
+    if (!validatedData.ip || !validatedData.win_ver) {
+      throw new BadRequestError('Missing required installation parameters');
+    }
+
+    // Validate IP format (basic IPv4 validation)
+    const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+    if (!ipRegex.test(validatedData.ip)) {
+      throw new BadRequestError('Invalid IP address format');
+    }
     // Check user quota first
     const hasQuota = await UserService.checkQuotaForInstallation(req.user.id);
     if (!hasQuota) {
@@ -407,6 +433,11 @@ router.post('/install',
       return;
     }
 
+    // Log install creation for audit
+    DatabaseSecurity.logDatabaseOperation('CREATE_INSTALL', 'install_data', req.user.id, {
+      ip: validatedData.ip,
+      win_ver: validatedData.win_ver
+    });
     // Create new install request
     const result = await db.run(`
       INSERT INTO install_data (user_id, ip, passwd_vps, win_ver, passwd_rdp, status)
@@ -440,12 +471,15 @@ router.post('/install',
 // Get user's install history
 router.get('/install-history',
   authenticateToken,
+  auditLogger('GET_INSTALL_HISTORY'),
   asyncHandler(async (req: Request, res: Response) => {
     if (!req.user) {
       throw new NotFoundError('User not found');
     }
 
     const db = getDatabase();
+    
+    // Use parameterized query to prevent SQL injection
     const installs = await db.all(
       'SELECT * FROM install_data WHERE user_id = ? ORDER BY created_at DESC',
       [req.user.id]
@@ -462,6 +496,7 @@ router.get('/install-history',
 // Get user quota
 router.get('/quota',
   authenticateToken,
+  auditLogger('GET_QUOTA'),
   asyncHandler(async (req: Request, res: Response) => {
     if (!req.user) {
       throw new NotFoundError('User not found');
