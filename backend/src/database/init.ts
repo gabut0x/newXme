@@ -49,11 +49,15 @@ export async function initializeDatabase(): Promise<Database> {
     // Enable foreign keys
     await db.run('PRAGMA foreign_keys = ON');
     
+    // Set timezone for SQLite connection
+    await db.run("PRAGMA timezone = 'Asia/Jakarta'");
+    
     // Create tables
     await createTables();
     
-    // Set timezone for this connection
-    await db.run("PRAGMA timezone = 'Asia/Jakarta'");
+    // Test timezone setting
+    const timeTest = await db.get("SELECT datetime('now') as utc_time, datetime('now', 'localtime') as local_time");
+    logger.info('Database timezone test:', timeTest);
     
     // Seed initial data
     await seedProducts();

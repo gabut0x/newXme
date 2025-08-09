@@ -6,11 +6,26 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Set timezone to Asia/Jakarta before loading any other modules
-process.env.TZ = 'Asia/Jakarta';
-
 // Load environment variables from the correct path
 dotenv.config({ path: path.join(__dirname, '../.env') });
+
+// Set timezone to Asia/Jakarta AFTER loading env vars
+process.env.TZ = 'Asia/Jakarta';
+
+// Force Node.js to use the new timezone
+if (process.platform === 'win32') {
+  // Windows specific timezone setting
+  process.env.TZ = 'Asia/Jakarta';
+} else {
+  // Unix/Linux timezone setting
+  process.env.TZ = 'Asia/Jakarta';
+}
+
+// Log timezone info for debugging
+console.log('Timezone Configuration:');
+console.log('- process.env.TZ:', process.env.TZ);
+console.log('- Date.now():', new Date().toString());
+console.log('- Jakarta time:', new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }));
 
 import express from 'express';
 import cors from 'cors';
@@ -213,7 +228,9 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
 // Health check endpoint
 app.get('/health', (req, res) => {
   const now = new Date();
-  const jakartaTime = now.toLocaleString('id-ID', {
+  
+  // Get Jakarta time using multiple methods for reliability
+  const jakartaTime1 = now.toLocaleString('id-ID', {
     timeZone: 'Asia/Jakarta',
     year: 'numeric',
     month: '2-digit',
@@ -223,13 +240,27 @@ app.get('/health', (req, res) => {
     second: '2-digit'
   });
   
+  const jakartaTime2 = new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).format(now);
+  
   res.status(200).json({
     status: 'OK',
-    timestamp: jakartaTime + ' WIB',
+    timestamp: jakartaTime1 + ' WIB',
+    timestamp_alt: jakartaTime2 + ' WIB',
     utc_timestamp: now.toISOString(),
+    timezone_env: process.env.TZ,
+    timezone_offset: now.getTimezoneOffset(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
-    timezone: 'Asia/Jakarta'
+    timezone: 'Asia/Jakarta',
+    local_time: now.toString()
   });
 });
 
