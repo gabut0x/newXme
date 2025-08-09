@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { logger } from '../utils/logger.js';
 import { seedProducts } from '../services/seedService.js';
+import { DateUtils } from '../utils/dateUtils.js';
 
 sqlite3.verbose();
 
@@ -50,6 +51,9 @@ export async function initializeDatabase(): Promise<Database> {
     
     // Create tables
     await createTables();
+    
+    // Set timezone for this connection
+    await db.run("PRAGMA timezone = 'Asia/Jakarta'");
     
     // Seed initial data
     await seedProducts();

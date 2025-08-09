@@ -127,12 +127,11 @@ router.post('/payment/callback',
       // Update transaction status
       await db.run(`
         UPDATE topup_transactions 
-        SET status = ?, paid_at = ?, updated_at = ?
+        SET status = ?, paid_at = ?, updated_at = datetime('now','localtime')
         WHERE reference = ?
       `, [
         callbackData.status,
         callbackData.status === 'PAID' ? new Date().toISOString() : null,
-        DateUtils.nowSQLite(),
         callbackData.reference
       ]);
 
@@ -832,8 +831,8 @@ router.get('/payment-methods/enabled',
           } else {
             // Insert new payment method (enabled by default)
             await db.run(
-              `INSERT INTO payment_methods (code, name, type, icon_url, fee_flat, fee_percent, minimum_fee, maximum_fee, is_enabled)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+              `INSERT INTO payment_methods (code, name, type, icon_url, fee_flat, fee_percent, minimum_fee, maximum_fee, is_enabled, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
               [
                 channel.code,
                 channel.name,
@@ -843,6 +842,8 @@ router.get('/payment-methods/enabled',
                 channel.fee_customer?.percent || 0,
                 channel.minimum_fee || 0,
                 channel.maximum_fee || 0
+                DateUtils.nowSQLite(),
+                DateUtils.nowSQLite()
               ]
             );
           }
