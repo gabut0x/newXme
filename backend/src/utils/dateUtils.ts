@@ -25,9 +25,20 @@ export class DateUtils {
    * Get current timestamp for SQLite (YYYY-MM-DD HH:MM:SS format)
    */
   static nowSQLite(): string {
-    return new Date().toLocaleString('sv-SE', { 
+    const now = new Date();
+    const jakartaTime = new Date(now.toLocaleString("en-US", {
       timeZone: this.JAKARTA_TIMEZONE 
-    });
+    }));
+    
+    // Format as YYYY-MM-DD HH:MM:SS for SQLite
+    const year = jakartaTime.getFullYear();
+    const month = String(jakartaTime.getMonth() + 1).padStart(2, '0');
+    const day = String(jakartaTime.getDate()).padStart(2, '0');
+    const hours = String(jakartaTime.getHours()).padStart(2, '0');
+    const minutes = String(jakartaTime.getMinutes()).padStart(2, '0');
+    const seconds = String(jakartaTime.getSeconds()).padStart(2, '0');
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
 
   /**

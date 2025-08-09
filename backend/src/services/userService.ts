@@ -475,8 +475,8 @@ export class UserService {
     
     try {
       await db.run(
-        "UPDATE users SET is_active = 0, updated_at = datetime('now','localtime') WHERE id = ?",
-        [id]
+        "UPDATE users SET is_active = 0, updated_at = ? WHERE id = ?",
+        [DateUtils.nowSQLite(), id]
       );
 
       logger.info('User soft deleted:', { userId: id });

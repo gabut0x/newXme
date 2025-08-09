@@ -127,11 +127,12 @@ router.post('/payment/callback',
       // Update transaction status
       await db.run(`
         UPDATE topup_transactions 
-        SET status = ?, paid_at = ?, updated_at = datetime('now','localtime')
+        SET status = ?, paid_at = ?, updated_at = ?
         WHERE reference = ?
       `, [
         callbackData.status,
         callbackData.status === 'PAID' ? new Date().toISOString() : null,
+        DateUtils.nowSQLite(),
         callbackData.reference
       ]);
 

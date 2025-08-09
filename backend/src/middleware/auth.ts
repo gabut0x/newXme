@@ -460,16 +460,34 @@ export function requireResourceOwnership(resourceIdParam: string = 'id', userIdF
 // SQL injection detection middleware
 export function sqlInjectionProtection(req: Request, res: Response, next: NextFunction): void {
   const sqlPatterns = [
-    /(\b(union|select|insert|update|delete|drop|create|alter|exec|execute)\b)/i,
-    /(--|\/\*|\*\/|;)/,
-    /(\b(or|and)\b.*=.*\b(or|and)\b)/i,
-    /('|(\\')|(;)|(\\))/,
-    /(0x[0-9a-f]+)/i,
-    /(\bchar\b|\bcast\b|\bconvert\b)/i
+    /(\b(union|select|insert|update|delete|drop|create|alter|exec|execute)\b.*\b(from|where|into|values)\b)/i,
+    /(--|\/\*|\*\/);/,
+    /(\b(or|and)\b.*=.*\b(or|and)\b.*=)/i,
+    /('.*'.*=.*'.*')/,
+    /(0x[0-9a-f]+.*=)/i,
+    /(\bchar\b|\bcast\b|\bconvert\b).*\(/i
   ];
 
   const checkForSqlInjection = (obj: any, path: string = ''): boolean => {
     if (typeof obj === 'string') {
+      // Skip checking for very short strings or common password patterns
+      if (obj.length < 3) return false;
+      
+      // Skip checking for email addresses
+      if (path.includes('email') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(obj)) {
+        return false;
+      }
+      
+      // Skip checking for usernames (alphanumeric + underscore/dash)
+      if (path.includes('username') && /^[a-zA-Z0-9_-]+$/.test(obj)) {
+        return false;
+      }
+      
+      // Skip checking for passwords that don't contain SQL keywords
+      if (path.includes('password') && !/\b(select|union|drop|insert|update|delete|create|alter)\b/i.test(obj)) {
+        return false;
+      }
+      
       return sqlPatterns.some(pattern => pattern.test(obj));
     }
     

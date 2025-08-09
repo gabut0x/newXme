@@ -647,8 +647,8 @@ router.post('/users/:id/quota', async (req: AuthenticatedRequest, res: Response)
     }
     
     await db.run(
-      "UPDATE users SET quota = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-      [newQuota, id]
+      "UPDATE users SET quota = ?, updated_at = ? WHERE id = ?",
+      [newQuota, DateUtils.nowSQLite(), id]
     );
     
     logger.info('Admin updated user quota:', {
