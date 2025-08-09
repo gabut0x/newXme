@@ -9,26 +9,27 @@ export class DateUtils {
    * Get current date/time in Asia/Jakarta timezone
    */
   static now(): Date {
-    return new Date();
+    const now = new Date();
+    // Convert to Jakarta timezone
+    const jakartaTime = new Date(now.toLocaleString("en-US", {
+      timeZone: this.JAKARTA_TIMEZONE 
+    }));
+    return jakartaTime;
   }
 
   /**
    * Get current timestamp in Asia/Jakarta timezone as ISO string
    */
   static nowISO(): string {
-    return new Date().toLocaleString('sv-SE', { 
-      timeZone: this.JAKARTA_TIMEZONE 
-    }).replace(' ', 'T') + '.000Z';
+    const jakartaTime = this.now();
+    return jakartaTime.toISOString();
   }
 
   /**
-   * Get current timestamp for SQLite (YYYY-MM-DD HH:MM:SS format)
+   * Get current timestamp for SQLite (YYYY-MM-DD HH:MM:SS format) in Jakarta timezone
    */
   static nowSQLite(): string {
-    const now = new Date();
-    const jakartaTime = new Date(now.toLocaleString("en-US", {
-      timeZone: this.JAKARTA_TIMEZONE 
-    }));
+    const jakartaTime = this.now();
     
     // Format as YYYY-MM-DD HH:MM:SS for SQLite
     const year = jakartaTime.getFullYear();
@@ -42,7 +43,7 @@ export class DateUtils {
   }
 
   /**
-   * Format date to Asia/Jakarta timezone
+   * Format date to Asia/Jakarta timezone display
    */
   static formatJakarta(date: Date | string): string {
     const dateObj = typeof date === 'string' ? new Date(date) : date;
@@ -58,29 +59,10 @@ export class DateUtils {
   }
 
   /**
-   * Get date in Jakarta timezone for SQLite datetime() function
-   */
-  static getJakartaDateForSQL(): string {
-    const now = new Date();
-    const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: this.JAKARTA_TIMEZONE}));
-    
-    // Format as YYYY-MM-DD HH:MM:SS for SQLite
-    const year = jakartaTime.getFullYear();
-    const month = String(jakartaTime.getMonth() + 1).padStart(2, '0');
-    const day = String(jakartaTime.getDate()).padStart(2, '0');
-    const hours = String(jakartaTime.getHours()).padStart(2, '0');
-    const minutes = String(jakartaTime.getMinutes()).padStart(2, '0');
-    const seconds = String(jakartaTime.getSeconds()).padStart(2, '0');
-    
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-  }
-
-  /**
-   * Add minutes to current Jakarta time
+   * Add minutes to current Jakarta time and return SQLite format
    */
   static addMinutesJakarta(minutes: number): string {
-    const now = new Date();
-    const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: this.JAKARTA_TIMEZONE}));
+    const jakartaTime = this.now();
     jakartaTime.setMinutes(jakartaTime.getMinutes() + minutes);
     
     const year = jakartaTime.getFullYear();
@@ -98,8 +80,7 @@ export class DateUtils {
    */
   static isPast(date: Date | string): boolean {
     const dateObj = typeof date === 'string' ? new Date(date) : date;
-    const now = new Date();
-    const jakartaNow = new Date(now.toLocaleString("en-US", {timeZone: this.JAKARTA_TIMEZONE}));
+    const jakartaNow = this.now();
     
     return dateObj < jakartaNow;
   }
@@ -108,8 +89,7 @@ export class DateUtils {
    * Get Unix timestamp for Jakarta timezone
    */
   static getJakartaUnixTimestamp(): number {
-    const now = new Date();
-    const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: this.JAKARTA_TIMEZONE}));
+    const jakartaTime = this.now();
     return Math.floor(jakartaTime.getTime() / 1000);
   }
 
@@ -127,5 +107,34 @@ export class DateUtils {
       minute: '2-digit',
       second: '2-digit'
     });
+  }
+
+  /**
+   * Convert any date to Jakarta timezone and return SQLite format
+   */
+  static toJakartaSQLite(date: Date | string): string {
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    const jakartaTime = new Date(dateObj.toLocaleString("en-US", {
+      timeZone: this.JAKARTA_TIMEZONE 
+    }));
+    
+    const year = jakartaTime.getFullYear();
+    const month = String(jakartaTime.getMonth() + 1).padStart(2, '0');
+    const day = String(jakartaTime.getDate()).padStart(2, '0');
+    const hours = String(jakartaTime.getHours()).padStart(2, '0');
+    const minutes = String(jakartaTime.getMinutes()).padStart(2, '0');
+    const seconds = String(jakartaTime.getSeconds()).padStart(2, '0');
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  }
+
+  /**
+   * Get Jakarta timezone offset in minutes
+   */
+  static getJakartaOffset(): number {
+    const now = new Date();
+    const utc = new Date(now.getTime() + (now.getTimezoneOffset() * 60000));
+    const jakarta = new Date(utc.toLocaleString("en-US", {timeZone: this.JAKARTA_TIMEZONE}));
+    return Math.floor((jakarta.getTime() - utc.getTime()) / 60000);
   }
 }

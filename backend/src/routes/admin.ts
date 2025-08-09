@@ -77,8 +77,8 @@ router.post('/windows-versions',
     }
     
     const result = await db.run(
-      'INSERT INTO windows_versions (name, slug) VALUES (?, ?)',
-      [validatedData.name, validatedData.slug]
+      'INSERT INTO windows_versions (name, slug, created_at, updated_at) VALUES (?, ?, ?, ?)',
+      [validatedData.name, validatedData.slug, DateUtils.nowSQLite(), DateUtils.nowSQLite()]
     );
     
     const newVersion = await db.get('SELECT * FROM windows_versions WHERE id = ?', [result.lastID]);
@@ -134,8 +134,8 @@ router.put('/windows-versions/:id',
     }
     
     await db.run(
-      "UPDATE windows_versions SET name = ?, slug = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-      [validatedData.name, validatedData.slug, id]
+      "UPDATE windows_versions SET name = ?, slug = ?, updated_at = ? WHERE id = ?",
+      [validatedData.name, validatedData.slug, DateUtils.nowSQLite(), id]
     );
     
     const updatedVersion = await db.get('SELECT * FROM windows_versions WHERE id = ?', [id]);
@@ -246,8 +246,8 @@ router.post('/products', asyncHandler(async (req: AuthenticatedRequest, res: Res
       const db = getDatabase();
       
       const result = await db.run(
-        'INSERT INTO products (name, description, price, image_url) VALUES (?, ?, ?, ?)',
-        [validatedData.name, validatedData.description || null, validatedData.price, validatedData.image_url || null]
+        'INSERT INTO products (name, description, price, image_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [validatedData.name, validatedData.description || null, validatedData.price, validatedData.image_url || null, DateUtils.nowSQLite(), DateUtils.nowSQLite()]
       );
       
       const newProduct = await db.get('SELECT * FROM products WHERE id = ?', [result.lastID]);
@@ -346,8 +346,8 @@ router.put('/products/:id', asyncHandler(async (req: AuthenticatedRequest, res: 
       const validatedData = productSchema.parse(productData);
       
       await db.run(
-        "UPDATE products SET name = ?, description = ?, price = ?, image_url = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-        [validatedData.name, validatedData.description || null, validatedData.price, validatedData.image_url || null, id]
+        "UPDATE products SET name = ?, description = ?, price = ?, image_url = ?, updated_at = ? WHERE id = ?",
+        [validatedData.name, validatedData.description || null, validatedData.price, validatedData.image_url || null, DateUtils.nowSQLite(), id]
       );
       
       const updatedProduct = await db.get('SELECT * FROM products WHERE id = ?', [id]);
@@ -472,8 +472,8 @@ router.put('/users/:id', async (req: AuthenticatedRequest, res: Response) => {
     }
     
     await db.run(
-      "UPDATE users SET is_active = ?, admin = ?, telegram = ?, quota = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-      [is_active, admin || 0, telegram || null, quota || 0, id]
+      "UPDATE users SET is_active = ?, admin = ?, telegram = ?, quota = ?, updated_at = ? WHERE id = ?",
+      [is_active, admin || 0, telegram || null, quota || 0, DateUtils.nowSQLite(), id]
     );
     
     const updatedUser = await db.get(`
@@ -544,8 +544,8 @@ router.put('/install-data/:id', async (req: AuthenticatedRequest, res: Response)
     }
     
     await db.run(
-      "UPDATE install_data SET status = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-      [status, id]
+      "UPDATE install_data SET status = ?, updated_at = ? WHERE id = ?",
+      [status, DateUtils.nowSQLite(), id]
     );
     
     const updatedInstallData = await db.get(`
@@ -647,8 +647,8 @@ router.post('/users/:id/quota', async (req: AuthenticatedRequest, res: Response)
     }
     
     await db.run(
-      "UPDATE users SET quota = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-      [newQuota, id]
+      "UPDATE users SET quota = ?, updated_at = ? WHERE id = ?",
+      [newQuota, DateUtils.nowSQLite(), id]
     );
     
     logger.info('Admin updated user quota:', {
@@ -768,8 +768,8 @@ router.patch('/payment-methods/:code', asyncHandler(async (req: AuthenticatedReq
       
       // Insert new record
       await db.run(
-        `INSERT INTO payment_methods (code, name, type, icon_url, fee_flat, fee_percent, minimum_fee, maximum_fee, is_enabled)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO payment_methods (code, name, type, icon_url, fee_flat, fee_percent, minimum_fee, maximum_fee, is_enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           channel.code,
           channel.name,
@@ -779,7 +779,9 @@ router.patch('/payment-methods/:code', asyncHandler(async (req: AuthenticatedReq
           channel.fee_customer?.percent || 0,
           channel.minimum_fee || 0,
           channel.maximum_fee || 0,
-          is_enabled ? 1 : 0
+          is_enabled ? 1 : 0,
+          DateUtils.nowSQLite(),
+          DateUtils.nowSQLite()
         ]
       );
     }
@@ -827,7 +829,7 @@ router.post('/payment-methods/sync', asyncHandler(async (req: AuthenticatedReque
         await db.run(
           `UPDATE payment_methods 
            SET name = ?, type = ?, icon_url = ?, fee_flat = ?, fee_percent = ?, 
-               minimum_fee = ?, maximum_fee = ?, updated_at = datetime('now','localtime') 
+               minimum_fee = ?, maximum_fee = ?, updated_at = ? 
            WHERE code = ?`,
           [
             channel.name,
@@ -837,6 +839,7 @@ router.post('/payment-methods/sync', asyncHandler(async (req: AuthenticatedReque
             channel.fee_customer?.percent || 0,
             channel.minimum_fee || 0,
             channel.maximum_fee || 0,
+            DateUtils.nowSQLite(),
             channel.code
           ]
         );
@@ -844,8 +847,8 @@ router.post('/payment-methods/sync', asyncHandler(async (req: AuthenticatedReque
       } else {
         // Insert new payment method (enabled by default)
         await db.run(
-          `INSERT INTO payment_methods (code, name, type, icon_url, fee_flat, fee_percent, minimum_fee, maximum_fee, is_enabled)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+          `INSERT INTO payment_methods (code, name, type, icon_url, fee_flat, fee_percent, minimum_fee, maximum_fee, is_enabled, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
           [
             channel.code,
             channel.name,
@@ -854,7 +857,9 @@ router.post('/payment-methods/sync', asyncHandler(async (req: AuthenticatedReque
             channel.fee_customer?.flat || 0,
             channel.fee_customer?.percent || 0,
             channel.minimum_fee || 0,
-            channel.maximum_fee || 0
+            channel.maximum_fee || 0,
+            DateUtils.nowSQLite(),
+            DateUtils.nowSQLite()
           ]
         );
         newCount++;

@@ -127,11 +127,12 @@ router.post('/payment/callback',
       // Update transaction status
       await db.run(`
         UPDATE topup_transactions 
-        SET status = ?, paid_at = ?, updated_at = datetime('now','localtime')
+        SET status = ?, paid_at = ?, updated_at = ?
         WHERE reference = ?
       `, [
         callbackData.status,
-        callbackData.status === 'PAID' ? new Date().toISOString() : null,
+        callbackData.status === 'PAID' ? DateUtils.nowSQLite() : null,
+        DateUtils.nowSQLite(),
         callbackData.reference
       ]);
 
@@ -190,7 +191,7 @@ router.put('/profile',
       // Update existing profile
       await db.run(`
         UPDATE user_profiles 
-        SET first_name = ?, last_name = ?, phone = ?, timezone = ?, language = ?, updated_at = datetime('now','localtime')
+        SET first_name = ?, last_name = ?, phone = ?, timezone = ?, language = ?, updated_at = ?
         WHERE user_id = ?
       `, [
         validatedData.firstName || null,
@@ -198,20 +199,23 @@ router.put('/profile',
         validatedData.phone || null,
         validatedData.timezone || 'UTC',
         validatedData.language || 'en',
+        DateUtils.nowSQLite(),
         req.user.id
       ]);
     } else {
       // Create new profile
       await db.run(`
-        INSERT INTO user_profiles (user_id, first_name, last_name, phone, timezone, language)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO user_profiles (user_id, first_name, last_name, phone, timezone, language, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         req.user.id,
         validatedData.firstName || null,
         validatedData.lastName || null,
         validatedData.phone || null,
         validatedData.timezone || 'UTC',
-        validatedData.language || 'en'
+        validatedData.language || 'en',
+        DateUtils.nowSQLite(),
+        DateUtils.nowSQLite()
       ]);
     }
 
@@ -440,15 +444,17 @@ router.post('/install',
     });
     // Create new install request
     const result = await db.run(`
-      INSERT INTO install_data (user_id, ip, passwd_vps, win_ver, passwd_rdp, status)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO install_data (user_id, ip, passwd_vps, win_ver, passwd_rdp, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       req.user.id,
       validatedData.ip,
       validatedData.passwd_vps || null,
       validatedData.win_ver,
       validatedData.passwd_rdp || null,
-      'pending'
+      'pending',
+      DateUtils.nowSQLite(),
+      DateUtils.nowSQLite()
     ]);
 
     const newInstall = await db.get('SELECT * FROM install_data WHERE id = ?', [result.lastID]);
@@ -565,8 +571,8 @@ router.post('/topup',
       INSERT INTO topup_transactions (
         user_id, merchant_ref, amount, quantity, total_amount, 
         discount_percentage, discount_amount, final_amount, 
-        payment_method, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        payment_method, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       req.user.id,
       merchantRef,
@@ -577,7 +583,9 @@ router.post('/topup',
       discountAmount,
       finalAmount,
       payment_method,
-      'PENDING'
+      'PENDING',
+      DateUtils.nowSQLite(),
+      DateUtils.nowSQLite()
     ]);
 
     try {
@@ -612,7 +620,7 @@ router.post('/topup',
       await db.run(`
         UPDATE topup_transactions 
         SET reference = ?, payment_url = ?, checkout_url = ?, pay_code = ?, 
-            status = ?, expired_time = ?, updated_at = datetime('now','localtime')
+            status = ?, expired_time = ?, updated_at = ?
         WHERE id = ?
       `, [
         tripayResponse.data.reference,
@@ -621,6 +629,7 @@ router.post('/topup',
         tripayResponse.data.pay_code,
         tripayResponse.data.status,
         tripayResponse.data.expired_time,
+        DateUtils.nowSQLite(),
         result.lastID
       ]);
 
@@ -815,7 +824,7 @@ router.get('/payment-methods/enabled',
             await db.run(
               `UPDATE payment_methods 
                SET name = ?, type = ?, icon_url = ?, fee_flat = ?, fee_percent = ?, 
-                   minimum_fee = ?, maximum_fee = ?, updated_at = datetime('now','localtime') 
+                   minimum_fee = ?, maximum_fee = ?, updated_at = ? 
                WHERE code = ?`,
               [
                 channel.name,
@@ -825,6 +834,7 @@ router.get('/payment-methods/enabled',
                 channel.fee_customer?.percent || 0,
                 channel.minimum_fee || 0,
                 channel.maximum_fee || 0,
+                DateUtils.nowSQLite(),
                 channel.code
               ]
             );
@@ -842,6 +852,8 @@ router.get('/payment-methods/enabled',
                 channel.fee_customer?.percent || 0,
                 channel.minimum_fee || 0,
                 channel.maximum_fee || 0
+                DateUtils.nowSQLite(),
+                DateUtils.nowSQLite()
                 DateUtils.nowSQLite(),
                 DateUtils.nowSQLite()
               ]

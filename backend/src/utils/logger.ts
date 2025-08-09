@@ -20,7 +20,7 @@ export class Logger {
   }
 
   private formatMessage(level: string, message: string, meta?: any): string {
-    const timestamp = DateUtils.formatJakarta(new Date());
+    const timestamp = DateUtils.formatJakarta(DateUtils.now());
     const metaStr = meta ? ` ${JSON.stringify(meta)}` : '';
     return `[${timestamp} WIB] ${level.toUpperCase()}: ${message}${metaStr}\n`;
   }

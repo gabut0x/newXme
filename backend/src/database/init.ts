@@ -49,20 +49,21 @@ export async function initializeDatabase(): Promise<Database> {
     // Enable foreign keys
     await db.run('PRAGMA foreign_keys = ON');
     
-    // Set timezone for SQLite connection
-    await db.run("PRAGMA timezone = 'Asia/Jakarta'");
-    
     // Create tables
     await createTables();
     
-    // Test timezone setting
-    const timeTest = await db.get("SELECT datetime('now') as utc_time, datetime('now', 'localtime') as local_time");
-    logger.info('Database timezone test:', timeTest);
+    // Test timezone setting with Jakarta time
+    const jakartaTime = DateUtils.nowSQLite();
+    logger.info('Database initialized with Jakarta timezone:', {
+      jakartaTime,
+      utcTime: new Date().toISOString(),
+      formattedJakarta: DateUtils.formatJakarta(new Date())
+    });
     
     // Seed initial data
     await seedProducts();
     
-    logger.info(`Database initialized at ${dbPath}`);
+    logger.info(`Database initialized at ${dbPath} with Asia/Jakarta timezone`);
     return db;
   } catch (error) {
     logger.error('Database initialization failed:', error);
@@ -74,7 +75,9 @@ async function createTables(): Promise<void> {
   if (!db) throw new Error('Database not initialized');
   
   try {
-    // Users table
+    const jakartaTime = DateUtils.nowSQLite();
+    
+    // Users table - using Jakarta time for defaults
     await db.run(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,8 +89,8 @@ async function createTables(): Promise<void> {
         admin INTEGER DEFAULT 0,
         telegram VARCHAR(255),
         quota INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT '${jakartaTime}',
+        updated_at DATETIME DEFAULT '${jakartaTime}',
         last_login DATETIME,
         failed_login_attempts INTEGER DEFAULT 0,
         locked_until DATETIME
@@ -112,7 +115,7 @@ async function createTables(): Promise<void> {
         type VARCHAR(20) NOT NULL, -- 'email_verification' or 'password_reset'
         expires_at DATETIME NOT NULL,
         used_at DATETIME,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT '${jakartaTime}',
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       )
     `);
@@ -125,7 +128,7 @@ async function createTables(): Promise<void> {
         session_token VARCHAR(255) NOT NULL,
         ip_address VARCHAR(45),
         user_agent TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT '${jakartaTime}',
         expires_at DATETIME NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
@@ -141,10 +144,10 @@ async function createTables(): Promise<void> {
         last_name VARCHAR(100),
         phone VARCHAR(20),
         avatar_url TEXT,
-        timezone VARCHAR(50) DEFAULT 'UTC',
-        language VARCHAR(10) DEFAULT 'en',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        timezone VARCHAR(50) DEFAULT 'Asia/Jakarta',
+        language VARCHAR(10) DEFAULT 'id',
+        created_at DATETIME DEFAULT '${jakartaTime}',
+        updated_at DATETIME DEFAULT '${jakartaTime}',
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       )
     `);
@@ -160,7 +163,7 @@ async function createTables(): Promise<void> {
         ip_address VARCHAR(45),
         user_agent TEXT,
         details TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT '${jakartaTime}',
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
       )
     `);
@@ -171,8 +174,8 @@ async function createTables(): Promise<void> {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name VARCHAR(255) NOT NULL,
         slug VARCHAR(100) UNIQUE NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT '${jakartaTime}',
+        updated_at DATETIME DEFAULT '${jakartaTime}'
       )
     `);
 
@@ -184,8 +187,8 @@ async function createTables(): Promise<void> {
         description TEXT,
         price DECIMAL(10,2) NOT NULL,
         image_url TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT '${jakartaTime}',
+        updated_at DATETIME DEFAULT '${jakartaTime}'
       )
     `);
 
@@ -194,14 +197,14 @@ async function createTables(): Promise<void> {
       CREATE TABLE IF NOT EXISTS install_data (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
-        start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        start_time DATETIME DEFAULT '${jakartaTime}',
         ip VARCHAR(45) NOT NULL,
         passwd_vps VARCHAR(255),
         win_ver VARCHAR(10) NOT NULL,
         passwd_rdp VARCHAR(255),
         status VARCHAR(50) NOT NULL DEFAULT 'pending',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT '${jakartaTime}',
+        updated_at DATETIME DEFAULT '${jakartaTime}',
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       )
     `);
@@ -235,8 +238,8 @@ async function createTables(): Promise<void> {
         minimum_fee INTEGER DEFAULT 0,
         maximum_fee INTEGER DEFAULT 0,
         is_enabled BOOLEAN DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT '${jakartaTime}',
+        updated_at DATETIME DEFAULT '${jakartaTime}'
       )
     `);
     
@@ -256,8 +259,8 @@ async function createTables(): Promise<void> {
         quantity INTEGER NOT NULL,
         total_amount DECIMAL(10,2) NOT NULL,
         payment_method VARCHAR(50),
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT '${jakartaTime}',
+        updated_at DATETIME DEFAULT '${jakartaTime}',
         paid_at DATETIME,
         FOREIGN KEY (uid) REFERENCES users (id) ON DELETE CASCADE
       )
@@ -269,7 +272,7 @@ async function createTables(): Promise<void> {
     await db.run('CREATE INDEX IF NOT EXISTS idx_orders_merchant_ref ON orders (merchant_ref)');
     await db.run('CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)');
     
-    logger.info('Database tables created successfully');
+    logger.info('Database tables created successfully with Asia/Jakarta timezone');
   } catch (error) {
     logger.error('Error creating database tables:', error);
     throw error;
@@ -280,13 +283,15 @@ async function createTopupTransactionsTable(): Promise<void> {
   if (!db) throw new Error('Database not initialized');
   
   try {
+    const jakartaTime = DateUtils.nowSQLite();
+    
     // First, check if the table exists and what its schema looks like
     const tableInfo = await db.all("PRAGMA table_info(topup_transactions)");
     const referenceColumn = tableInfo.find(col => col.name === 'reference');
     
     if (tableInfo.length === 0) {
       // Table doesn't exist, create it with correct schema
-      logger.info('Creating topup_transactions table with nullable reference field');
+      logger.info('Creating topup_transactions table with nullable reference field and Jakarta timezone');
       await db.run(`
         CREATE TABLE topup_transactions (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -305,15 +310,15 @@ async function createTopupTransactionsTable(): Promise<void> {
           pay_code VARCHAR(255),
           status VARCHAR(50) NOT NULL DEFAULT 'UNPAID',
           expired_time INTEGER,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          created_at DATETIME DEFAULT '${jakartaTime}',
+          updated_at DATETIME DEFAULT '${jakartaTime}',
           paid_at DATETIME,
           FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
       `);
     } else if (referenceColumn && referenceColumn.notnull === 1) {
       // Table exists but reference field is NOT NULL, need to migrate
-      logger.info('Migrating topup_transactions table to allow nullable reference field');
+      logger.info('Migrating topup_transactions table to allow nullable reference field with Jakarta timezone');
       
       // Disable foreign key constraints temporarily
       await db.run('PRAGMA foreign_keys = OFF');
@@ -338,8 +343,8 @@ async function createTopupTransactionsTable(): Promise<void> {
             pay_code VARCHAR(255),
             status VARCHAR(50) NOT NULL DEFAULT 'UNPAID',
             expired_time INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT '${jakartaTime}',
+            updated_at DATETIME DEFAULT '${jakartaTime}',
             paid_at DATETIME,
             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
           )
@@ -348,6 +353,11 @@ async function createTopupTransactionsTable(): Promise<void> {
         // Copy existing data, handling potential NULL reference values
         const existingData = await db.all('SELECT * FROM topup_transactions');
         for (const row of existingData) {
+          // Convert existing timestamps to Jakarta time if they exist
+          const createdAt = row.created_at ? DateUtils.toJakartaSQLite(new Date(row.created_at)) : jakartaTime;
+          const updatedAt = row.updated_at ? DateUtils.toJakartaSQLite(new Date(row.updated_at)) : jakartaTime;
+          const paidAt = row.paid_at ? DateUtils.toJakartaSQLite(new Date(row.paid_at)) : null;
+          
           await db.run(`
             INSERT INTO topup_transactions_new (
               id, user_id, reference, merchant_ref, amount, quantity, total_amount,
@@ -359,8 +369,7 @@ async function createTopupTransactionsTable(): Promise<void> {
             row.id, row.user_id, row.reference, row.merchant_ref, row.amount,
             row.quantity, row.total_amount, row.discount_percentage, row.discount_amount,
             row.final_amount, row.payment_method, row.payment_url, row.checkout_url,
-            row.pay_code, row.status, row.expired_time, row.created_at,
-            row.updated_at, row.paid_at
+            row.pay_code, row.status, row.expired_time, createdAt, updatedAt, paidAt
           ]);
         }
         
@@ -368,7 +377,7 @@ async function createTopupTransactionsTable(): Promise<void> {
         await db.run('DROP TABLE topup_transactions');
         await db.run('ALTER TABLE topup_transactions_new RENAME TO topup_transactions');
         
-        logger.info('Successfully migrated topup_transactions table');
+        logger.info('Successfully migrated topup_transactions table with Jakarta timezone');
       } finally {
         // Always re-enable foreign key constraints
         await db.run('PRAGMA foreign_keys = ON');
@@ -396,7 +405,8 @@ async function createTopupTransactionsTable(): Promise<void> {
         // Drop the problematic table (this will lose data!)
         await db.run('DROP TABLE IF EXISTS topup_transactions');
         
-        // Create the table with correct schema
+        // Create the table with correct schema and Jakarta timezone
+        const jakartaTime = DateUtils.nowSQLite();
         await db.run(`
           CREATE TABLE topup_transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -415,14 +425,14 @@ async function createTopupTransactionsTable(): Promise<void> {
             pay_code VARCHAR(255),
             status VARCHAR(50) NOT NULL DEFAULT 'UNPAID',
             expired_time INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT '${jakartaTime}',
+            updated_at DATETIME DEFAULT '${jakartaTime}',
             paid_at DATETIME,
             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
           )
         `);
         
-        logger.warn('Successfully recreated topup_transactions table (existing data was lost)');
+        logger.warn('Successfully recreated topup_transactions table with Jakarta timezone (existing data was lost)');
       } catch (fallbackError) {
         logger.error('Fallback table creation also failed:', fallbackError);
         throw fallbackError;
