@@ -151,6 +151,9 @@ export class InstallService {
       // Update status to running
       await this.updateInstallStatus(installId, 'running', 'Installation script executed successfully');
 
+      // Start monitoring installation progress (optional background task)
+      this.startInstallationMonitoring(installId, userId, ip, winVersion, rdpPassword);
+
       logger.info('Windows installation initiated successfully:', {
         userId,
         installId,
@@ -918,5 +921,103 @@ reboot -f >/dev/null 2>&1
       
       return false;
     }
+  }
+
+  /**
+   * Start monitoring installation progress (background task)
+   */
+  private static async startInstallationMonitoring(
+    installId: number,
+    userId: number,
+    ip: string,
+    winVersion: string,
+    rdpPassword: string
+  ): Promise<void> {
+    // This runs in the background to monitor installation progress
+    setTimeout(async () => {
+      try {
+        // Check installation status after 30 minutes
+        const install = await this.getInstallById(installId);
+        
+        if (install && install.status === 'running') {
+          // Check if Windows is accessible via RDP (port 3389)
+          const isWindowsReady = await this.checkWindowsRDP(ip);
+          
+          if (isWindowsReady) {
+            await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
+            
+            // Send completion notification
+            const { NotificationService } = await import('./notificationService.js');
+            await NotificationService.notifyInstallationCompleted(userId, {
+              ip,
+              winVersion,
+              rdpPassword
+            });
+          } else {
+            // Check again after more time or mark as failed
+            setTimeout(async () => {
+              const finalCheck = await this.checkWindowsRDP(ip);
+              if (finalCheck) {
+                await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
+                
+                const { NotificationService } = await import('./notificationService.js');
+                await NotificationService.notifyInstallationCompleted(userId, {
+                  ip,
+                  winVersion,
+                  rdpPassword
+                });
+              } else {
+                await this.updateInstallStatus(installId, 'failed', 'Installation timeout - Windows did not become accessible');
+                
+                // Refund quota
+                const db = getDatabase();
+                await db.run(
+                  'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+                  [DateUtils.nowSQLite(), userId]
+                );
+                
+                const { NotificationService } = await import('./notificationService.js');
+                await NotificationService.notifyInstallationFailed(userId, {
+                  ip,
+                  winVersion,
+                  error: 'Installation timeout - Windows did not become accessible within the expected timeframe'
+                });
+              }
+            }, 30 * 60 * 1000); // Check again after 30 more minutes
+          }
+        }
+      } catch (error: any) {
+        logger.error('Installation monitoring failed:', {
+          installId,
+          userId,
+          error: error.message
+        });
+      }
+    }, 30 * 60 * 1000); // Initial check after 30 minutes
+  }
+
+  /**
+   * Check if Windows RDP is accessible
+   */
+  private static async checkWindowsRDP(ip: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = createConnection({ host: ip, port: 3389, timeout: 10000 });
+      
+      socket.on('connect', () => {
+        socket.destroy();
+        logger.info('Windows RDP is accessible:', { ip });
+        resolve(true);
+      });
+
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve(false);
+      });
+
+      socket.on('error', () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
   }
 }
