@@ -602,6 +602,59 @@ router.delete('/install-data/:id', async (req: AuthenticatedRequest, res: Respon
   }
 });
 
+// Delete user route
+router.delete('/users/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const db = getDatabase();
+    
+    // Check if user exists
+    const existing = await db.get('SELECT id, username FROM users WHERE id = ?', [id]);
+    if (!existing) {
+      res.status(404).json({
+        success: false,
+        message: 'User not found',
+        error: 'User does not exist'
+      });
+      return;
+    }
+    
+    // Prevent admin from deleting themselves
+    if (req.user?.id === parseInt(id)) {
+      res.status(400).json({
+        success: false,
+        message: 'Cannot delete your own account',
+        error: 'Self-deletion not allowed'
+      });
+      return;
+    }
+    
+    // Log deletion attempt
+    DatabaseSecurity.logDatabaseOperation('DELETE_USER', 'users', req.user?.id, { targetUserId: id, targetUsername: existing.username });
+    
+    // Delete user (cascade will handle related records)
+    await db.run('DELETE FROM users WHERE id = ?', [id]);
+    
+    logger.info('Admin deleted user:', {
+      adminId: req.user?.id,
+      deletedUserId: id,
+      deletedUsername: existing.username
+    });
+    
+    res.json({
+      success: true,
+      message: 'User deleted successfully'
+    });
+  } catch (error) {
+    logger.error('Error deleting user:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete user',
+      error: 'Internal server error'
+    });
+  }
+});
+
 // Quota Management Routes for Admins
 router.post('/users/:id/quota', async (req: AuthenticatedRequest, res: Response) => {
   try {

@@ -430,6 +430,14 @@ class ApiService {
     return this.api.delete(`/admin/install-data/${id}`);
   }
 
+  async deleteUser(id: number): Promise<AxiosResponse<ApiResponse>> {
+    return this.api.delete(`/admin/users/${id}`);
+  }
+
+  async updateUserQuota(id: number, data: { amount: number; operation: 'add' | 'set' }): Promise<AxiosResponse<ApiResponse<{ userId: number; oldQuota: number; newQuota: number; operation: string; amount: number }>>> {
+    return this.api.post(`/admin/users/${id}/quota`, data);
+  }
+
   // Admin payment methods endpoints
   async getAdminPaymentMethods(): Promise<AxiosResponse<ApiResponse<PaymentMethod[]>>> {
     return this.api.get('/admin/payment-methods');
