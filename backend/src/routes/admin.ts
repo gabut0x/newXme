@@ -337,8 +337,8 @@ router.put('/products/:id', asyncHandler(async (req: AuthenticatedRequest, res: 
       const validatedData = productSchema.parse(productData);
       
       await db.run(
-        "UPDATE products SET name = ?, description = ?, price = ?, image_url = ?, updated_at = ? WHERE id = ?",
-        [validatedData.name, validatedData.description || null, validatedData.price, validatedData.image_url || null, DateUtils.nowSQLite(), id]
+        "UPDATE products SET name = ?, description = ?, price = ?, image_url = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+        [validatedData.name, validatedData.description || null, validatedData.price, validatedData.image_url || null, id]
       );
       
       const updatedProduct = await db.get('SELECT * FROM products WHERE id = ?', [id]);
@@ -818,7 +818,7 @@ router.post('/payment-methods/sync', asyncHandler(async (req: AuthenticatedReque
         await db.run(
           `UPDATE payment_methods 
            SET name = ?, type = ?, icon_url = ?, fee_flat = ?, fee_percent = ?, 
-               minimum_fee = ?, maximum_fee = ?, updated_at = datetime('now','localtime') 
+               minimum_fee = ?, maximum_fee = ?, updated_at = ? 
            WHERE code = ?`,
           [
             channel.name,
@@ -828,6 +828,7 @@ router.post('/payment-methods/sync', asyncHandler(async (req: AuthenticatedReque
             channel.fee_customer?.percent || 0,
             channel.minimum_fee || 0,
             channel.maximum_fee || 0,
+            DateUtils.nowSQLite(),
             channel.code
           ]
         );
