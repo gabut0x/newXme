@@ -133,7 +133,7 @@ export class UserService {
       values.push(id);
 
       await db.run(
-        `UPDATE users SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        `UPDATE users SET ${setClause}, updated_at = datetime('now','localtime') WHERE id = ?`,
         values
       );
 
@@ -156,7 +156,7 @@ export class UserService {
       const passwordHash = await AuthUtils.hashPassword(newPassword);
       
       await db.run(
-        'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        'UPDATE users SET password_hash = ?, updated_at = datetime('now','localtime') WHERE id = ?',
         [passwordHash, id]
       );
 
@@ -194,7 +194,7 @@ export class UserService {
                WHEN failed_login_attempts >= 4 THEN datetime('now', '+30 minutes')
                ELSE locked_until 
              END,
-             updated_at = CURRENT_TIMESTAMP
+             updated_at = datetime('now','localtime')
          WHERE id = ?`,
         [id]
       );
@@ -212,8 +212,8 @@ export class UserService {
         `UPDATE users 
          SET failed_login_attempts = 0, 
              locked_until = NULL,
-             last_login = CURRENT_TIMESTAMP,
-             updated_at = CURRENT_TIMESTAMP
+             last_login = datetime('now','localtime'),
+             updated_at = datetime('now','localtime')
          WHERE id = ?`,
         [id]
       );
@@ -291,7 +291,7 @@ export class UserService {
       values.push(userId);
 
       await db.run(
-        `UPDATE user_profiles SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`,
+        `UPDATE user_profiles SET ${setClause}, updated_at = datetime('now','localtime') WHERE user_id = ?`,
         values
       );
 
@@ -360,7 +360,7 @@ export class UserService {
 
       // Mark code as used
       await db.run(
-        'UPDATE verification_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ?',
+        'UPDATE verification_codes SET used_at = datetime('now','localtime') WHERE id = ?',
         [verification.id]
       );
 
@@ -446,7 +446,7 @@ export class UserService {
     
     try {
       await db.run(
-        'UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        'UPDATE users SET is_active = 0, updated_at = datetime('now','localtime') WHERE id = ?',
         [id]
       );
 
@@ -475,7 +475,7 @@ export class UserService {
     
     try {
       await db.run(
-        'UPDATE users SET quota = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        'UPDATE users SET quota = ?, updated_at = datetime('now','localtime') WHERE id = ?',
         [newQuota, userId]
       );
 
