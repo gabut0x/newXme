@@ -1,6 +1,5 @@
 import express, { Request, Response } from 'express';
 import { getDatabase } from '../database/init.js';
-import { DateUtils } from '../utils/dateUtils.js';
 import { 
   authenticateToken, 
   requireVerifiedUser,
@@ -123,8 +122,8 @@ router.put('/windows-versions/:id', async (req: AuthenticatedRequest, res: Respo
     }
     
     await db.run(
-      "UPDATE windows_versions SET name = ?, slug = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-      [validatedData.name, validatedData.slug, id]
+      "UPDATE windows_versions SET name = ?, slug = ?, updated_at = ? WHERE id = ?",
+      [validatedData.name, validatedData.slug, DateUtils.nowSQLite(), id]
     );
     
     const updatedVersion = await db.get('SELECT * FROM windows_versions WHERE id = ?', [id]);
