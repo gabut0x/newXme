@@ -89,7 +89,7 @@ app.use(bruteForceProtection(10, 15)); // 10 attempts per 15 minutes
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'), // Reduced for security
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '1000'), // Reduced for security
   message: {
     error: 'Too many requests from this IP, please try again later.',
   },

@@ -604,7 +604,7 @@ export default function UserDashboardPage() {
 
         {/* Main Content */}
         <main className="flex-1 lg:ml-64 pt-20">
-          <div className="container mx-auto px-6 py-8">
+          <div className="container mx-auto px-6 pt-2 pb-6 md:py-8">
             {/* Dashboard Tab */}
             {activeTab === 'dashboard' && (
               <div className="space-y-6">

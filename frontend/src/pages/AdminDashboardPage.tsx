@@ -518,10 +518,16 @@ export default function AdminDashboardPage() {
             <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
               <Shield className="h-4 w-4 text-primary-foreground" />
             </div>
-            <div>
-              <h1 className="text-md md:text-xl font-bold">XME Projects Admin</h1>
-              <p className="text-sm text-muted-foreground hidden sm:block">Administrative Dashboard</p>
+
+            <div className='block sm:hidden'>
+              <h1 className='text-sm font-bold'>XME Admin</h1>
             </div>
+
+            <div className='hidden sm:block'>
+              <h1 className="text-md md:text-xl font-bold">XME Projects Admin</h1>
+              <p className="text-sm text-muted-foreground">Administrative Dashboard</p>
+            </div>
+
           </div>
 
           <div className="flex items-center gap-1 md:gap-4">
@@ -616,7 +622,7 @@ export default function AdminDashboardPage() {
 
         {/* Main Content */}
         <main className="flex-1 lg:ml-64 pt-20">
-          <div className="container mx-auto px-6 py-8">
+          <div className="container mx-auto px-6 pt-2 pb-6 md:py-8">
             {/* Dashboard Tab */}
             {activeTab === 'dashboard' && (
               <div className="space-y-6">
