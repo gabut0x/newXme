@@ -852,8 +852,6 @@ router.get('/payment-methods/enabled',
                 channel.minimum_fee || 0,
                 channel.maximum_fee || 0,
                 DateUtils.nowSQLite(),
-                DateUtils.nowSQLite(),
-                DateUtils.nowSQLite(),
                 DateUtils.nowSQLite()
               ]
             );
