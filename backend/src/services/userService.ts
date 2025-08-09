@@ -156,7 +156,7 @@ export class UserService {
       const passwordHash = await AuthUtils.hashPassword(newPassword);
       
       await db.run(
-        'UPDATE users SET password_hash = ?, updated_at = datetime('now','localtime') WHERE id = ?',
+        "UPDATE users SET password_hash = ?, updated_at = datetime('now','localtime') WHERE id = ?",
         [passwordHash, id]
       );
 
@@ -360,7 +360,7 @@ export class UserService {
 
       // Mark code as used
       await db.run(
-        'UPDATE verification_codes SET used_at = datetime('now','localtime') WHERE id = ?',
+        "UPDATE verification_codes SET used_at = datetime('now','localtime') WHERE id = ?",
         [verification.id]
       );
 
@@ -446,7 +446,7 @@ export class UserService {
     
     try {
       await db.run(
-        'UPDATE users SET is_active = 0, updated_at = datetime('now','localtime') WHERE id = ?',
+        "UPDATE users SET is_active = 0, updated_at = datetime('now','localtime') WHERE id = ?",
         [id]
       );
 
@@ -475,7 +475,7 @@ export class UserService {
     
     try {
       await db.run(
-        'UPDATE users SET quota = ?, updated_at = datetime('now','localtime') WHERE id = ?',
+        "UPDATE users SET quota = ?, updated_at = datetime('now','localtime') WHERE id = ?",
         [newQuota, userId]
       );
 

@@ -122,7 +122,7 @@ router.put('/windows-versions/:id', async (req: AuthenticatedRequest, res: Respo
     }
     
     await db.run(
-      'UPDATE windows_versions SET name = ?, slug = ?, updated_at = datetime('now','localtime') WHERE id = ?',
+      "UPDATE windows_versions SET name = ?, slug = ?, updated_at = datetime('now','localtime') WHERE id = ?",
       [validatedData.name, validatedData.slug, id]
     );
     
@@ -337,7 +337,7 @@ router.put('/products/:id', asyncHandler(async (req: AuthenticatedRequest, res: 
       const validatedData = productSchema.parse(productData);
       
       await db.run(
-        'UPDATE products SET name = ?, description = ?, price = ?, image_url = ?, updated_at = datetime('now','localtime') WHERE id = ?',
+        "UPDATE products SET name = ?, description = ?, price = ?, image_url = ?, updated_at = datetime('now','localtime') WHERE id = ?",
         [validatedData.name, validatedData.description || null, validatedData.price, validatedData.image_url || null, id]
       );
       
@@ -463,7 +463,7 @@ router.put('/users/:id', async (req: AuthenticatedRequest, res: Response) => {
     }
     
     await db.run(
-      'UPDATE users SET is_active = ?, admin = ?, telegram = ?, quota = ?, updated_at = datetime('now','localtime') WHERE id = ?',
+      "UPDATE users SET is_active = ?, admin = ?, telegram = ?, quota = ?, updated_at = datetime('now','localtime') WHERE id = ?",
       [is_active, admin || 0, telegram || null, quota || 0, id]
     );
     
@@ -535,7 +535,7 @@ router.put('/install-data/:id', async (req: AuthenticatedRequest, res: Response)
     }
     
     await db.run(
-      'UPDATE install_data SET status = ?, updated_at = datetime('now','localtime') WHERE id = ?',
+      "UPDATE install_data SET status = ?, updated_at = datetime('now','localtime') WHERE id = ?",
       [status, id]
     );
     
@@ -638,7 +638,7 @@ router.post('/users/:id/quota', async (req: AuthenticatedRequest, res: Response)
     }
     
     await db.run(
-      'UPDATE users SET quota = ?, updated_at = datetime('now','localtime') WHERE id = ?',
+      "UPDATE users SET quota = ?, updated_at = datetime('now','localtime') WHERE id = ?",
       [newQuota, id]
     );
     
@@ -742,7 +742,7 @@ router.patch('/payment-methods/:code', asyncHandler(async (req: AuthenticatedReq
     if (existingMethod) {
       // Update existing record
       await db.run(
-        'UPDATE payment_methods SET is_enabled = ?, updated_at = datetime('now','localtime') WHERE code = ?',
+        "UPDATE payment_methods SET is_enabled = ?, updated_at = datetime('now','localtime') WHERE code = ?",
         [is_enabled ? 1 : 0, code]
       );
     } else {
