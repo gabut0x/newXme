@@ -541,6 +541,12 @@ export default function TopupModal({ open, onOpenChange, onSuccess }: TopupModal
                       <span>Status:</span>
                       <Badge variant="secondary">{paymentData.status}</Badge>
                     </div>
+                    <div className="flex justify-between">
+                      <span>Expires:</span>
+                      <span className="text-red-600 font-medium">
+                        {new Date(paymentData.expired_time * 1000).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

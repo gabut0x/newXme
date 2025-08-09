@@ -34,12 +34,12 @@ import {
   securityHeaders, 
   requestLogger, 
   sqlInjectionProtection,
-  validateContentType,
-  requestSizeLimit
+  validateContentType
 } from './middleware/auth.js';
 import { 
   bruteForceProtection,
-  requestTimeout
+  requestTimeout,
+  requestSizeLimit
 } from './middleware/security.js';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/user.js';
