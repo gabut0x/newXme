@@ -1,0 +1,922 @@
+import { getDatabase } from '../database/init.js';
+import { logger } from '../utils/logger.js';
+import { DateUtils } from '../utils/dateUtils.js';
+import { DatabaseSecurity } from '../utils/dbSecurity.js';
+import { Client } from 'ssh2';
+import { createConnection } from 'net';
+import axios from 'axios';
+import crypto from 'crypto';
+import zlib from 'zlib';
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export interface InstallValidationResult {
+  isValid: boolean;
+  error?: string;
+  step?: string;
+}
+
+export interface OSInfo {
+  name: string;
+  version: string;
+}
+
+export interface IPInfo {
+  country: string;
+  countryCode: string;
+  provider: string;
+}
+
+export interface InstallProgress {
+  step: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  message: string;
+  timestamp: string;
+}
+
+export class InstallService {
+  private static readonly SUPPORTED_OS = {
+    'Ubuntu': ['20', '22'],
+    'Debian GNU/Linux': ['12']
+  };
+
+  private static readonly ASIA_COUNTRY_CODES = [
+    "AF", "AFG", "AM", "ARM", "AZ", "AZE", "BH", "BHR", "BD", "BGD", "BT", "BTN", 
+    "MM", "MMR", "KH", "KHM", "CN", "CHN", "CY", "CYP", "GE", "GEO", "IN", "IND", 
+    "ID", "IDN", "IR", "IRN", "IQ", "IRQ", "IL", "ISR", "JP", "JPN", "JO", "JOR", 
+    "KZ", "KAZ", "KP", "PRK", "KR", "KOR", "KW", "KWT", "KG", "KGZ", "LA", "LAO", 
+    "LB", "LBN", "MY", "MYS", "MV", "MDV", "MN", "MNG", "NP", "NPL", "OM", "OMN", 
+    "PK", "PAK", "PH", "PHL", "QA", "QAT", "SA", "SAU", "SG", "SGP", "LK", "LKA", 
+    "SY", "SYR", "TJ", "TJK", "TH", "THA", "TL", "TLS", "TM", "TKM", "AE", "ARE", 
+    "UZ", "UZB", "VN", "VNM", "YE", "YEM"
+  ];
+
+  private static readonly TRACK_SERVER = process.env.TRACK_SERVER || 'https://your-track-server.com';
+
+  /**
+   * Main installation process with comprehensive validation
+   */
+  static async processInstallation(
+    userId: number,
+    ip: string,
+    vpsPassword: string,
+    winVersion: string,
+    rdpPassword: string
+  ): Promise<{ success: boolean; message: string; installId?: number }> {
+    const db = getDatabase();
+    let installId: number | null = null;
+
+    try {
+      // Log installation attempt
+      logger.info('Starting Windows installation process:', {
+        userId,
+        ip,
+        winVersion,
+        timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
+      });
+
+      // Step 1: Validate user quota
+      const quotaValidation = await this.validateUserQuota(userId);
+      if (!quotaValidation.isValid) {
+        return { success: false, message: quotaValidation.error! };
+      }
+
+      // Step 2: Validate Windows version
+      const winValidation = await this.validateWindowsVersion(winVersion);
+      if (!winValidation.isValid) {
+        return { success: false, message: winValidation.error! };
+      }
+
+      // Step 3: Validate RDP password
+      const rdpValidation = this.validateRdpPassword(rdpPassword);
+      if (!rdpValidation.isValid) {
+        return { success: false, message: rdpValidation.error! };
+      }
+
+      // Step 4: Validate IPv4 address
+      const ipValidation = this.validateIPv4(ip);
+      if (!ipValidation.isValid) {
+        return { success: false, message: ipValidation.error! };
+      }
+
+      // Step 5: Check if VPS is online
+      const onlineValidation = await this.validateVPSOnline(ip);
+      if (!onlineValidation.isValid) {
+        return { success: false, message: onlineValidation.error! };
+      }
+
+      // Step 6: Validate SSH credentials
+      const sshClient = await this.validateSSHCredentials(ip, vpsPassword);
+      if (!sshClient) {
+        return { success: false, message: 'SSH authentication failed. Please check your VPS password.' };
+      }
+
+      // Step 7: Validate OS support
+      const osValidation = await this.validateOSSupport(sshClient);
+      if (!osValidation.isValid) {
+        sshClient.end();
+        return { success: false, message: osValidation.error! };
+      }
+
+      // Create install record before execution
+      const result = await db.run(`
+        INSERT INTO install_data (user_id, ip, passwd_vps, win_ver, passwd_rdp, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        userId,
+        ip,
+        vpsPassword,
+        winVersion,
+        rdpPassword,
+        'pending',
+        DateUtils.nowSQLite(),
+        DateUtils.nowSQLite()
+      ]);
+
+      installId = result.lastID as number;
+
+      // Deduct user quota
+      await db.run(
+        'UPDATE users SET quota = quota - 1, updated_at = ? WHERE id = ?',
+        [DateUtils.nowSQLite(), userId]
+      );
+
+      // Step 8: Execute installation script
+      await this.executeInstallationScript(sshClient, userId, ip, winVersion, rdpPassword, installId);
+
+      // Update status to running
+      await this.updateInstallStatus(installId, 'running', 'Installation script executed successfully');
+
+      logger.info('Windows installation initiated successfully:', {
+        userId,
+        installId,
+        ip,
+        winVersion
+      });
+
+      return {
+        success: true,
+        message: 'Windows installation started successfully. You will be notified when the process is complete.',
+        installId
+      };
+
+    } catch (error: any) {
+      logger.error('Installation process failed:', {
+        userId,
+        ip,
+        error: error.message,
+        stack: error.stack
+      });
+
+      // Update install status to failed if we have an installId
+      if (installId) {
+        await this.updateInstallStatus(installId, 'failed', error.message);
+      }
+
+      return {
+        success: false,
+        message: error.message || 'Installation failed due to an unexpected error'
+      };
+    }
+  }
+
+  /**
+   * Step 1: Validate user quota
+   */
+  private static async validateUserQuota(userId: number): Promise<InstallValidationResult> {
+    try {
+      const db = getDatabase();
+      const user = await db.get('SELECT quota FROM users WHERE id = ?', [userId]);
+      
+      if (!user) {
+        return { isValid: false, error: 'User not found', step: 'quota_validation' };
+      }
+
+      if (user.quota <= 0) {
+        return { 
+          isValid: false, 
+          error: 'Insufficient quota. Please top up your quota to continue.', 
+          step: 'quota_validation' 
+        };
+      }
+
+      logger.info('Quota validation passed:', { userId, quota: user.quota });
+      return { isValid: true, step: 'quota_validation' };
+    } catch (error: any) {
+      logger.error('Quota validation failed:', error);
+      return { isValid: false, error: 'Failed to validate quota', step: 'quota_validation' };
+    }
+  }
+
+  /**
+   * Step 2: Validate Windows version
+   */
+  private static async validateWindowsVersion(winVersion: string): Promise<InstallValidationResult> {
+    try {
+      const db = getDatabase();
+      const version = await db.get('SELECT id FROM windows_versions WHERE slug = ?', [winVersion]);
+      
+      if (!version) {
+        return { 
+          isValid: false, 
+          error: 'Invalid Windows version selected', 
+          step: 'windows_validation' 
+        };
+      }
+
+      logger.info('Windows version validation passed:', { winVersion });
+      return { isValid: true, step: 'windows_validation' };
+    } catch (error: any) {
+      logger.error('Windows version validation failed:', error);
+      return { isValid: false, error: 'Failed to validate Windows version', step: 'windows_validation' };
+    }
+  }
+
+  /**
+   * Step 3: Validate RDP password
+   */
+  private static validateRdpPassword(rdpPassword: string): InstallValidationResult {
+    if (!rdpPassword || rdpPassword.length <= 3) {
+      return { 
+        isValid: false, 
+        error: 'RDP password must be longer than 3 characters', 
+        step: 'rdp_password_validation' 
+      };
+    }
+
+    if (rdpPassword.startsWith('#')) {
+      return { 
+        isValid: false, 
+        error: 'RDP password cannot start with "#" character', 
+        step: 'rdp_password_validation' 
+      };
+    }
+
+    logger.info('RDP password validation passed');
+    return { isValid: true, step: 'rdp_password_validation' };
+  }
+
+  /**
+   * Step 4: Validate IPv4 address
+   */
+  private static validateIPv4(ip: string): InstallValidationResult {
+    const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+    
+    if (!ipv4Regex.test(ip)) {
+      return { 
+        isValid: false, 
+        error: 'Invalid IPv4 address format', 
+        step: 'ipv4_validation' 
+      };
+    }
+
+    // Additional validation for private/reserved IPs
+    const parts = ip.split('.').map(Number);
+    
+    // Check for localhost
+    if (parts[0] === 127) {
+      return { 
+        isValid: false, 
+        error: 'Localhost IP addresses are not allowed', 
+        step: 'ipv4_validation' 
+      };
+    }
+
+    // Check for private networks (optional - remove if you want to allow private IPs)
+    const isPrivate = (
+      (parts[0] === 10) ||
+      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+      (parts[0] === 192 && parts[1] === 168)
+    );
+
+    if (isPrivate) {
+      logger.warn('Private IP address detected:', { ip });
+      // You can choose to allow or disallow private IPs
+      // return { isValid: false, error: 'Private IP addresses are not allowed', step: 'ipv4_validation' };
+    }
+
+    logger.info('IPv4 validation passed:', { ip });
+    return { isValid: true, step: 'ipv4_validation' };
+  }
+
+  /**
+   * Step 5: Check if VPS is online (port 22 SSH)
+   */
+  private static async validateVPSOnline(ip: string): Promise<InstallValidationResult> {
+    return new Promise((resolve) => {
+      const socket = createConnection({ host: ip, port: 22, timeout: 7000 });
+      
+      socket.on('connect', () => {
+        socket.destroy();
+        logger.info('VPS online validation passed:', { ip });
+        resolve({ isValid: true, step: 'vps_online_validation' });
+      });
+
+      socket.on('timeout', () => {
+        socket.destroy();
+        logger.warn('VPS connection timeout:', { ip });
+        resolve({ 
+          isValid: false, 
+          error: `VPS at ${ip} is not responding. Please check if the server is online and SSH is enabled.`, 
+          step: 'vps_online_validation' 
+        });
+      });
+
+      socket.on('error', (error) => {
+        socket.destroy();
+        logger.warn('VPS connection error:', { ip, error: error.message });
+        resolve({ 
+          isValid: false, 
+          error: `Cannot connect to VPS at ${ip}. Please verify the IP address and ensure SSH is accessible.`, 
+          step: 'vps_online_validation' 
+        });
+      });
+    });
+  }
+
+  /**
+   * Step 6: Validate SSH credentials
+   */
+  private static async validateSSHCredentials(ip: string, password: string): Promise<Client | null> {
+    return new Promise((resolve) => {
+      const client = new Client();
+      
+      client.on('ready', () => {
+        logger.info('SSH authentication successful:', { ip });
+        resolve(client);
+      });
+
+      client.on('error', (error) => {
+        logger.warn('SSH authentication failed:', { ip, error: error.message });
+        client.end();
+        resolve(null);
+      });
+
+      try {
+        client.connect({
+          host: ip,
+          port: 22,
+          username: 'root',
+          password: password,
+          readyTimeout: 10000,
+          algorithms: {
+            kex: ['diffie-hellman-group14-sha256', 'diffie-hellman-group14-sha1'],
+            cipher: ['aes128-ctr', 'aes192-ctr', 'aes256-ctr'],
+            hmac: ['hmac-sha2-256', 'hmac-sha2-512', 'hmac-sha1'],
+            compress: ['none']
+          }
+        });
+      } catch (error: any) {
+        logger.error('SSH connection setup failed:', { ip, error: error.message });
+        resolve(null);
+      }
+    });
+  }
+
+  /**
+   * Step 7: Validate OS support
+   */
+  private static async validateOSSupport(client: Client): Promise<InstallValidationResult> {
+    return new Promise((resolve) => {
+      client.exec("cat /etc/os-release | grep -E '^(NAME|VERSION_ID)='", (err, stream) => {
+        if (err) {
+          logger.error('Failed to get OS info:', err);
+          resolve({ 
+            isValid: false, 
+            error: 'Failed to retrieve OS information from VPS', 
+            step: 'os_validation' 
+          });
+          return;
+        }
+
+        let output = '';
+        
+        stream.on('data', (data: Buffer) => {
+          output += data.toString();
+        });
+
+        stream.on('close', () => {
+          try {
+            const osInfo = this.parseOSInfo(output);
+            const isSupported = this.isOSSupported(osInfo);
+            
+            if (!isSupported) {
+              resolve({ 
+                isValid: false, 
+                error: `Unsupported OS: ${osInfo.name} ${osInfo.version}. Please use Ubuntu 20/22 or Debian 12.`, 
+                step: 'os_validation' 
+              });
+              return;
+            }
+
+            logger.info('OS validation passed:', osInfo);
+            resolve({ isValid: true, step: 'os_validation' });
+          } catch (error: any) {
+            logger.error('OS info parsing failed:', error);
+            resolve({ 
+              isValid: false, 
+              error: 'Failed to parse OS information', 
+              step: 'os_validation' 
+            });
+          }
+        });
+
+        stream.on('error', (error: Error) => {
+          logger.error('OS info stream error:', error);
+          resolve({ 
+            isValid: false, 
+            error: 'Error reading OS information', 
+            step: 'os_validation' 
+          });
+        });
+      });
+    });
+  }
+
+  /**
+   * Step 8: Execute installation script remotely
+   */
+  private static async executeInstallationScript(
+    client: Client,
+    userId: number,
+    ip: string,
+    winVersion: string,
+    rdpPassword: string,
+    installId: number
+  ): Promise<void> {
+    try {
+      // Get IP information for region determination
+      const ipInfo = await this.getIPInfo(ip);
+      const region = this.determineRegion(ipInfo.countryCode);
+      
+      // Generate protected download link
+      const gzFilename = `${winVersion}.gz`;
+      const signature = this.generateSignedUrl(ip, gzFilename);
+      const gzLink = `${this.TRACK_SERVER}/download/${region}/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbGxhdGlvbi55b3Uuc2hvbGRudC5zZWUudGhpcw/${gzFilename}${signature}`;
+
+      logger.info('Generated installation link:', {
+        userId,
+        installId,
+        ip,
+        region,
+        gzLink: gzLink.substring(0, 100) + '...' // Log partial link for security
+      });
+
+      // Create and execute installation script
+      const obfuscatedScript = await this.createInstallationScript(gzLink, rdpPassword);
+      const command = this.buildExecutionCommand(obfuscatedScript);
+
+      // Execute the command
+      await this.executeRemoteCommand(client, command, userId, installId);
+
+      // Log successful execution
+      DatabaseSecurity.logDatabaseOperation('EXECUTE_INSTALL_SCRIPT', 'install_data', userId, {
+        installId,
+        ip,
+        winVersion,
+        region
+      });
+
+      logger.info('Installation script executed successfully:', {
+        userId,
+        installId,
+        ip,
+        region
+      });
+
+    } catch (error: any) {
+      logger.error('Script execution failed:', {
+        userId,
+        installId,
+        ip,
+        error: error.message
+      });
+      throw error;
+    } finally {
+      client.end();
+    }
+  }
+
+  /**
+   * Parse OS information from /etc/os-release
+   */
+  private static parseOSInfo(output: string): OSInfo {
+    const lines = output.trim().split('\n');
+    const info: { [key: string]: string } = {};
+    
+    for (const line of lines) {
+      const [key, value] = line.split('=');
+      if (key && value) {
+        info[key.trim()] = value.trim().replace(/"/g, '');
+      }
+    }
+
+    return {
+      name: info['NAME'] || 'Unknown',
+      version: info['VERSION_ID'] || 'Unknown'
+    };
+  }
+
+  /**
+   * Check if OS is supported
+   */
+  private static isOSSupported(osInfo: OSInfo): boolean {
+    const supportedVersions = this.SUPPORTED_OS[osInfo.name];
+    if (!supportedVersions) {
+      return false;
+    }
+
+    return supportedVersions.some(version => osInfo.version.startsWith(version));
+  }
+
+  /**
+   * Get IP geolocation information
+   */
+  private static async getIPInfo(ip: string): Promise<IPInfo> {
+    try {
+      // Use a free IP geolocation service
+      const response = await axios.get(`http://ip-api.com/json/${ip}`, {
+        timeout: 5000
+      });
+
+      if (response.data.status === 'success') {
+        return {
+          country: response.data.country || 'Unknown',
+          countryCode: response.data.countryCode || 'SG',
+          provider: response.data.org || 'Unknown'
+        };
+      }
+    } catch (error) {
+      logger.warn('Failed to get IP info, using defaults:', { ip, error });
+    }
+
+    return {
+      country: 'Unknown',
+      countryCode: 'SG',
+      provider: 'Unknown'
+    };
+  }
+
+  /**
+   * Determine region based on country code
+   */
+  private static determineRegion(countryCode: string): string {
+    if (countryCode === 'AU' || countryCode === 'AUS') {
+      return 'australia';
+    }
+    
+    if (this.ASIA_COUNTRY_CODES.includes(countryCode)) {
+      return 'asia';
+    }
+    
+    return 'global';
+  }
+
+  /**
+   * Generate signed URL for download protection
+   */
+  private static generateSignedUrl(ip: string, filename: string): string {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const raw = `${ip}:${filename}:${timestamp}`;
+    const signature = crypto.createHash('sha256').update(raw).digest('hex');
+    
+    return `?sig=${timestamp}.${signature}`;
+  }
+
+  /**
+   * Create installation script with obfuscation
+   */
+  private static async createInstallationScript(gzLink: string, rdpPassword: string): Promise<Buffer> {
+    try {
+      // Read the base installation script template
+      const scriptPath = path.join(__dirname, '../scripts/inst.sh');
+      let scriptContent: string;
+      
+      try {
+        scriptContent = await fs.readFile(scriptPath, 'utf-8');
+      } catch (error) {
+        // Fallback script if file doesn't exist
+        scriptContent = this.getDefaultInstallScript();
+      }
+
+      // Replace placeholders
+      const modifiedContent = scriptContent
+        .replace(/__GZLINK__/g, gzLink)
+        .replace(/__PASSWD__/g, rdpPassword);
+
+      // Simple obfuscation (you can enhance this)
+      const obfuscated = this.obfuscateScript(modifiedContent);
+      
+      return Buffer.from(obfuscated);
+    } catch (error: any) {
+      logger.error('Failed to create installation script:', error);
+      throw new Error('Failed to prepare installation script');
+    }
+  }
+
+  /**
+   * Simple script obfuscation
+   */
+  private static obfuscateScript(script: string): string {
+    // Basic obfuscation - encode and compress
+    const compressed = zlib.gzipSync(Buffer.from(script));
+    const encoded = compressed.toString('base64');
+    
+    // Create a wrapper that decodes and executes
+    return `#!/bin/bash
+# Obfuscated installation script
+echo "${encoded}" | base64 -d | gzip -d | bash`;
+  }
+
+  /**
+   * Build the final execution command
+   */
+  private static buildExecutionCommand(obfuscatedScript: Buffer): string {
+    const compressed = zlib.gzipSync(obfuscatedScript);
+    const encoded = compressed.toString('base64');
+    
+    // Create a stealthy execution command
+    return `setsid bash -c '{ exec -a "[kworker/u8:5-kworker/0:0]" bash <<<"echo \\"${encoded}\\" | base64 -d | gzip -d | exec -a \\"[kworker/u8:1-events]\\" bash -s" & }; disown' > /dev/null 2>&1`;
+  }
+
+  /**
+   * Execute remote command via SSH
+   */
+  private static async executeRemoteCommand(
+    client: Client,
+    command: string,
+    userId: number,
+    installId: number
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      client.exec(command, (err, stream) => {
+        if (err) {
+          logger.error('Failed to execute remote command:', { userId, installId, error: err.message });
+          reject(new Error('Failed to execute installation command'));
+          return;
+        }
+
+        let output = '';
+        let errorOutput = '';
+
+        stream.on('data', (data: Buffer) => {
+          output += data.toString();
+        });
+
+        stream.stderr.on('data', (data: Buffer) => {
+          errorOutput += data.toString();
+        });
+
+        stream.on('close', (code: number) => {
+          if (code !== 0) {
+            logger.error('Remote command failed:', {
+              userId,
+              installId,
+              exitCode: code,
+              output,
+              errorOutput
+            });
+            reject(new Error(`Installation script failed with exit code ${code}`));
+            return;
+          }
+
+          logger.info('Remote command executed successfully:', {
+            userId,
+            installId,
+            exitCode: code
+          });
+          
+          resolve();
+        });
+
+        stream.on('error', (error: Error) => {
+          logger.error('Remote command stream error:', {
+            userId,
+            installId,
+            error: error.message
+          });
+          reject(error);
+        });
+      });
+    });
+  }
+
+  /**
+   * Update installation status
+   */
+  static async updateInstallStatus(
+    installId: number,
+    status: string,
+    message?: string
+  ): Promise<void> {
+    try {
+      const db = getDatabase();
+      await db.run(
+        'UPDATE install_data SET status = ?, updated_at = ? WHERE id = ?',
+        [status, DateUtils.nowSQLite(), installId]
+      );
+
+      logger.info('Install status updated:', {
+        installId,
+        status,
+        message,
+        timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
+      });
+
+      // Log status change for audit
+      DatabaseSecurity.logDatabaseOperation('UPDATE_INSTALL_STATUS', 'install_data', undefined, {
+        installId,
+        status,
+        message
+      });
+    } catch (error: any) {
+      logger.error('Failed to update install status:', {
+        installId,
+        status,
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Handle installation progress updates from remote script
+   */
+  static async handleProgressUpdate(
+    installId: number,
+    step: string,
+    status: 'pending' | 'running' | 'completed' | 'failed',
+    message: string
+  ): Promise<void> {
+    try {
+      const db = getDatabase();
+      
+      // Update main status
+      await this.updateInstallStatus(installId, status, message);
+
+      // You can also store detailed progress in a separate table if needed
+      logger.info('Installation progress updated:', {
+        installId,
+        step,
+        status,
+        message,
+        timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
+      });
+
+      // Here you can add notification logic for real-time updates
+      // For example, using WebSockets or Server-Sent Events
+      
+    } catch (error: any) {
+      logger.error('Failed to handle progress update:', {
+        installId,
+        step,
+        status,
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Check if IP is currently being processed
+   */
+  static async isIPActive(region: string, ip: string): Promise<boolean> {
+    try {
+      const response = await axios.get(`${this.TRACK_SERVER}/${region}/check?ip=${ip}`, {
+        timeout: 5000
+      });
+      
+      return response.data?.active === true;
+    } catch (error) {
+      logger.warn('Failed to check IP status:', { region, ip, error });
+      return false;
+    }
+  }
+
+  /**
+   * Get default installation script if file doesn't exist
+   */
+  private static getDefaultInstallScript(): string {
+    return `#!/bin/bash
+# XME Projects Windows Installation Script
+# This script will download and install Windows on your VPS
+
+export tmpTARGET='__GZLINK__'
+export setNet='0'
+export AutoNet='1'
+export FORCE1STNICNAME=''
+export FORCENETCFGSTR=''
+export FORCEPASSWORD='__PASSWD__'
+
+# Log installation start
+echo "Starting Windows installation process..."
+echo "Target: $tmpTARGET"
+echo "Password configured: $([ -n "$FORCEPASSWORD" ] && echo "Yes" || echo "No")"
+
+# Download and execute installation
+curl -fsSL "$tmpTARGET" | bash
+
+# Reboot to complete installation
+echo "Installation script completed. Rebooting..."
+reboot -f >/dev/null 2>&1
+`;
+  }
+
+  /**
+   * Get installation by ID
+   */
+  static async getInstallById(installId: number): Promise<any> {
+    try {
+      const db = getDatabase();
+      const install = await db.get(
+        'SELECT * FROM install_data WHERE id = ?',
+        [installId]
+      );
+      
+      return install;
+    } catch (error: any) {
+      logger.error('Failed to get install by ID:', { installId, error: error.message });
+      return null;
+    }
+  }
+
+  /**
+   * Get user's active installations
+   */
+  static async getUserActiveInstalls(userId: number): Promise<any[]> {
+    try {
+      const db = getDatabase();
+      const installs = await db.all(
+        'SELECT * FROM install_data WHERE user_id = ? AND status IN (?, ?) ORDER BY created_at DESC',
+        [userId, 'pending', 'running']
+      );
+      
+      return installs;
+    } catch (error: any) {
+      logger.error('Failed to get user active installs:', { userId, error: error.message });
+      return [];
+    }
+  }
+
+  /**
+   * Cancel installation (if still pending)
+   */
+  static async cancelInstallation(installId: number, userId: number): Promise<boolean> {
+    try {
+      const db = getDatabase();
+      
+      // Check if installation can be cancelled
+      const install = await db.get(
+        'SELECT status, user_id FROM install_data WHERE id = ?',
+        [installId]
+      );
+
+      if (!install) {
+        throw new Error('Installation not found');
+      }
+
+      if (install.user_id !== userId) {
+        throw new Error('Unauthorized to cancel this installation');
+      }
+
+      if (install.status !== 'pending') {
+        throw new Error('Installation cannot be cancelled at this stage');
+      }
+
+      // Update status to cancelled and refund quota
+      await db.run('BEGIN TRANSACTION');
+      
+      await db.run(
+        'UPDATE install_data SET status = ?, updated_at = ? WHERE id = ?',
+        ['cancelled', DateUtils.nowSQLite(), installId]
+      );
+
+      await db.run(
+        'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+        [DateUtils.nowSQLite(), userId]
+      );
+
+      await db.run('COMMIT');
+
+      logger.info('Installation cancelled and quota refunded:', {
+        installId,
+        userId
+      });
+
+      return true;
+    } catch (error: any) {
+      const db = getDatabase();
+      await db.run('ROLLBACK');
+      
+      logger.error('Failed to cancel installation:', {
+        installId,
+        userId,
+        error: error.message
+      });
+      
+      return false;
+    }
+  }
+}

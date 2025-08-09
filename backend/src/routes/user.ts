@@ -19,6 +19,7 @@ import { tripayService } from '../services/tripayService.js';
 import { DateUtils } from '../utils/dateUtils.js';
 import { DatabaseSecurity } from '../utils/dbSecurity.js';
 
+import { NotificationService } from '../services/notificationService.js';
 const router = express.Router();
 
 // Apply security middleware to all routes
@@ -139,6 +140,17 @@ router.post('/payment/callback',
       // If payment is successful, add quota to user
       if (callbackData.status === 'PAID') {
         await UserService.incrementUserQuota(userId, quantity);
+        
+        // Get updated user quota for notification
+        const updatedQuota = await UserService.getUserQuota(userId);
+        
+        // Send quota added notification
+        await NotificationService.notifyQuotaAdded(userId, {
+          quantity,
+          paymentMethod: callbackData.payment_method || 'Unknown',
+          reference: callbackData.reference,
+          newBalance: updatedQuota
+        });
         
         logger.info('Payment successful, quota added:', {
           userId: userId,
