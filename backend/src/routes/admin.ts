@@ -742,8 +742,8 @@ router.patch('/payment-methods/:code', asyncHandler(async (req: AuthenticatedReq
     if (existingMethod) {
       // Update existing record
       await db.run(
-        "UPDATE payment_methods SET is_enabled = ?, updated_at = datetime('now','localtime') WHERE code = ?",
-        [is_enabled ? 1 : 0, code]
+        "UPDATE payment_methods SET is_enabled = ?, updated_at = ? WHERE code = ?",
+        [is_enabled ? 1 : 0, DateUtils.nowSQLite(), code]
       );
     } else {
       // Get payment method details from Tripay
@@ -818,7 +818,7 @@ router.post('/payment-methods/sync', asyncHandler(async (req: AuthenticatedReque
         await db.run(
           `UPDATE payment_methods 
            SET name = ?, type = ?, icon_url = ?, fee_flat = ?, fee_percent = ?, 
-               minimum_fee = ?, maximum_fee = ?, updated_at = ? 
+               minimum_fee = ?, maximum_fee = ?, updated_at = datetime('now','localtime') 
            WHERE code = ?`,
           [
             channel.name,
@@ -828,7 +828,6 @@ router.post('/payment-methods/sync', asyncHandler(async (req: AuthenticatedReque
             channel.fee_customer?.percent || 0,
             channel.minimum_fee || 0,
             channel.maximum_fee || 0,
-            DateUtils.nowSQLite(),
             channel.code
           ]
         );

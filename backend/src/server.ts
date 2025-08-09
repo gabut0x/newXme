@@ -142,11 +142,24 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  const now = new Date();
+  const jakartaTime = now.toLocaleString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+  
   res.status(200).json({
     status: 'OK',
-    timestamp: new Date().toISOString(),
+    timestamp: jakartaTime + ' WIB',
+    utc_timestamp: now.toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
+    timezone: 'Asia/Jakarta'
   });
 });
 

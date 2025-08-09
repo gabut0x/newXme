@@ -19,9 +19,9 @@ export class Logger {
   }
 
   private formatMessage(level: string, message: string, meta?: any): string {
-    const timestamp = new Date().toISOString();
+    const timestamp = DateUtils.formatJakarta(new Date());
     const metaStr = meta ? ` ${JSON.stringify(meta)}` : '';
-    return `[${timestamp}] ${level.toUpperCase()}: ${message}${metaStr}\n`;
+    return `[${timestamp} WIB] ${level.toUpperCase()}: ${message}${metaStr}\n`;
   }
 
   private writeToFile(formattedMessage: string): void {
