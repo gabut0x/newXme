@@ -122,8 +122,8 @@ router.put('/windows-versions/:id', async (req: AuthenticatedRequest, res: Respo
     }
     
     await db.run(
-      "UPDATE windows_versions SET name = ?, slug = ?, updated_at = ? WHERE id = ?",
-      [validatedData.name, validatedData.slug, DateUtils.nowSQLite(), id]
+      "UPDATE windows_versions SET name = ?, slug = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+      [validatedData.name, validatedData.slug, id]
     );
     
     const updatedVersion = await db.get('SELECT * FROM windows_versions WHERE id = ?', [id]);
@@ -337,8 +337,8 @@ router.put('/products/:id', asyncHandler(async (req: AuthenticatedRequest, res: 
       const validatedData = productSchema.parse(productData);
       
       await db.run(
-        "UPDATE products SET name = ?, description = ?, price = ?, image_url = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-        [validatedData.name, validatedData.description || null, validatedData.price, validatedData.image_url || null, id]
+        "UPDATE products SET name = ?, description = ?, price = ?, image_url = ?, updated_at = ? WHERE id = ?",
+        [validatedData.name, validatedData.description || null, validatedData.price, validatedData.image_url || null, DateUtils.nowSQLite(), id]
       );
       
       const updatedProduct = await db.get('SELECT * FROM products WHERE id = ?', [id]);
