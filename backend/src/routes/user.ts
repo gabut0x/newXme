@@ -623,9 +623,9 @@ router.post('/topup',
       // Update transaction status to failed
       await db.run(`
         UPDATE topup_transactions 
-        SET status = 'FAILED', updated_at = datetime('now','localtime') 
+        SET status = 'FAILED', updated_at = ? 
         WHERE id = ?
-      `, [result.lastID]);
+      `, [DateUtils.nowSQLite(), result.lastID]);
 
       logger.error('Tripay transaction failed:', {
         userId: req.user.id,

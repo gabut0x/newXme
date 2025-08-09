@@ -475,8 +475,8 @@ export class UserService {
     
     try {
       await db.run(
-        "UPDATE users SET quota = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-        [newQuota, userId]
+        "UPDATE users SET quota = ?, updated_at = ? WHERE id = ?",
+        [newQuota, DateUtils.nowSQLite(), userId]
       );
 
       logger.info('User quota updated:', { userId, newQuota });

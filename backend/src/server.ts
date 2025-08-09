@@ -1,11 +1,13 @@
 // Load environment variables first - before any other imports
-process.env.TZ = 'Asia/Jakarta';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Set timezone to Asia/Jakarta before loading any other modules
+process.env.TZ = 'Asia/Jakarta';
 
 // Load environment variables from the correct path
 dotenv.config({ path: path.join(__dirname, '../.env') });
