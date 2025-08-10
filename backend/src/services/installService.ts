@@ -341,7 +341,7 @@ export class InstallService {
         logger.warn('SSH connection timeout:', { ip });
         client.end();
         resolve(null);
-      }, 15000); // 15 seconds timeout
+      }, 10000); // 10 seconds timeout
       
       client.on('ready', () => {
         clearTimeout(connectionTimeout);
@@ -607,7 +607,7 @@ export class InstallService {
   /**
    * Create installation script with obfuscation
    */
-  private static async createInstallationScript(gzLink: string, rdpPassword: string, installId?: number): Promise<Buffer> {
+  private static async createInstallationScript(gzLink: string, rdpPassword: string): Promise<Buffer> {
     try {
       // Read the base installation script template
       const scriptPath = path.join(__dirname, '../scripts/inst.sh');
@@ -625,15 +625,6 @@ export class InstallService {
         .replace(/__GZLINK__/g, gzLink)
         .replace(/__PASSWD__/g, rdpPassword);
       
-      // Add progress endpoint if installId is provided
-      if (installId) {
-        const progressEndpoint = `${process.env.APP_URL || 'http://localhost:3001'}/api/install/progress`;
-        modifiedContent = modifiedContent.replace(
-          /export tmpTARGET=/,
-          `export PROGRESS_ENDPOINT='${progressEndpoint}'\nexport INSTALL_ID='${installId}'\nexport tmpTARGET=`
-        );
-      }
-
       // Simple obfuscation (you can enhance this)
       const obfuscated = this.obfuscateScript(modifiedContent);
       
@@ -816,48 +807,13 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
     }
   }
 
-  /**
-   * Check if IP is currently being processed
-   */
-  static async isIPActive(region: string, ip: string): Promise<boolean> {
-    try {
-      const response = await axios.get(`${this.TRACK_SERVER}/${region}/check?ip=${ip}`, {
-        timeout: 5000
-      });
-      
-      return response.data?.active === true;
-    } catch (error) {
-      logger.warn('Failed to check IP status:', { region, ip, error });
-      return false;
-    }
-  }
 
   /**
    * Get default installation script if file doesn't exist
    */
   private static getDefaultInstallScript(): string {
     return `#!/bin/bash
-# XME Projects Windows Installation Script
-# This script will download and install Windows on your VPS
-
-export tmpTARGET='__GZLINK__'
-export setNet='0'
-export AutoNet='1'
-export FORCE1STNICNAME=''
-export FORCENETCFGSTR=''
-export FORCEPASSWORD='__PASSWD__'
-
-# Log installation start
-echo "Starting Windows installation process..."
-echo "Target: $tmpTARGET"
-echo "Password configured: $([ -n "$FORCEPASSWORD" ] && echo "Yes" || echo "No")"
-
-# Download and execute installation
-curl -fsSL "$tmpTARGET" | bash
-
-# Reboot to complete installation
-echo "Installation script completed. Rebooting..."
-reboot -f >/dev/null 2>&1
+...
 `;
   }
 
@@ -928,11 +884,6 @@ reboot -f >/dev/null 2>&1
       await db.run(
         'UPDATE install_data SET status = ?, updated_at = ? WHERE id = ?',
         ['cancelled', DateUtils.nowSQLite(), installId]
-      );
-
-      await db.run(
-        'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
-        [DateUtils.nowSQLite(), userId]
       );
 
       await db.run('COMMIT');
@@ -1035,7 +986,7 @@ reboot -f >/dev/null 2>&1
    */
   private static async checkWindowsRDP(ip: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port: 3389, timeout: 10000 });
+      const socket = createConnection({ host: ip, port: 22, timeout: 10000 });
       
       socket.on('connect', () => {
         socket.destroy();
