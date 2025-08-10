@@ -385,10 +385,14 @@ class ApiService {
       throw new Error('No authentication token available');
     }
     
-    const baseURL = this.api.defaults.baseURL;
+    // Get the base URL, handling both relative and absolute URLs
+    const baseURL = this.api.defaults.baseURL || '';
+    const fullBaseURL = baseURL.startsWith('http') 
+      ? baseURL 
+      : `${window.location.protocol}//${window.location.host}${baseURL}`;
     
     // Create URL with auth token as query parameter since EventSource can't send custom headers
-    const url = new URL(`${baseURL}/user/notifications/stream`);
+    const url = new URL(`${fullBaseURL}/user/notifications/stream`);
     url.searchParams.set('token', token);
     
     const eventSource = new EventSource(url.toString());
