@@ -973,26 +973,55 @@ export default function UserDashboardPage() {
                     >
                       {isLoadingTopup ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    {isConnected ? (
+                      <Wifi className="h-3 w-3 text-green-500" title="Real-time updates connected" />
+                    ) : (
+                      <WifiOff className="h-3 w-3 text-red-500" title="Real-time updates disconnected" />
+                    )}
                       ) : (
                         <History className="h-4 w-4 mr-2" />
                       )}
                       Refresh
-                    </Button>
+                {notifications && notifications.length > 0 ? (
                   </div>
-                </div>
-
+                    {notifications.slice(0, 5).map((notification, index) => (
+                      <div key={index} className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
                 <Card>
-                  <CardContent className="p-6 h-[550px]">
+                          {notification.type === 'install_status_update' && notification.status === 'completed' ? (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          ) : notification.type === 'install_status_update' && notification.status === 'failed' ? (
+                            <XCircle className="h-4 w-4 text-red-500" />
+                          ) : notification.type === 'install_status_update' && notification.status === 'running' ? (
+                            <Activity className="h-4 w-4 text-blue-500" />
+                          ) : (
                     {isLoadingTopup ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-8 w-8 animate-spin" />
                       </div>
                     ) : topupHistory.length === 0 ? (
                       <div className="text-center py-8">
-                        <History className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                          <p className="text-sm font-medium">
+                            {notification.type === 'install_status_update' 
+                              ? `Installation ${notification.status?.charAt(0).toUpperCase()}${notification.status?.slice(1)}`
+                              : 'System Notification'
+                            }
+                          </p>
                         <p className="text-muted-foreground mb-2">No transactions found</p>
-                        <p className="text-sm text-muted-foreground mb-4">
-                          Your topup history will appear here
+                          <div className="flex items-center justify-between mt-1">
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(notification.timestamp).toLocaleString()}
+                            </p>
+                            {notification.ip && (
+                              <Badge variant="outline" className="text-xs">
+                                {notification.ip}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {notifications.length > 5 && (
+                      <div className="text-center">
+                        <p className="text-xs text-muted-foreground">
+                          And {notifications.length - 5} more notifications...
                         </p>
                       </div>
                     ) : (

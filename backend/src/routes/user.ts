@@ -44,7 +44,8 @@ router.get('/notifications/stream',
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': req.headers.origin || '*',
+      'Access-Control-Allow-Credentials': 'true',
       'Access-Control-Allow-Headers': 'Cache-Control'
     });
 

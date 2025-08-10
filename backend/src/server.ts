@@ -49,8 +49,8 @@ import { installRoutes } from './routes/install.js';
 import { downloadRoutes } from './routes/download.js';
 import { initializeDatabase } from './database/init.js';
 import { connectRedis } from './config/redis.js';
-import { logger } from './utils/logger.js';
 import { emailService } from './services/emailService.js';
+import { DateUtils } from './utils/dateUtils.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
