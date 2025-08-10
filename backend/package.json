@@ -16,7 +16,9 @@
     "lint:fix": "eslint src/**/*.ts --fix"
   },
   "dependencies": {
+    "@maxmind/geoip2-node": "^6.1.0",
     "axios": "^1.11.0",
+    "bash-obfuscate": "^1.2.1",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.6",

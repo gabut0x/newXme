@@ -2,14 +2,15 @@ import { getDatabase } from '../database/init.js';
 import { logger } from '../utils/logger.js';
 import { DateUtils } from '../utils/dateUtils.js';
 import { DatabaseSecurity } from '../utils/dbSecurity.js';
+import { GeoIPService } from './geoipService.js';
 import { Client } from 'ssh2';
 import { createConnection } from 'net';
-import axios from 'axios';
 import crypto from 'crypto';
-import zlib from 'zlib';
+import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import zlib from 'zlib';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,12 +26,6 @@ export interface OSInfo {
   version: string;
 }
 
-export interface IPInfo {
-  country: string;
-  countryCode: string;
-  provider: string;
-}
-
 export interface InstallProgress {
   step: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
@@ -44,18 +39,7 @@ export class InstallService {
     'Debian GNU/Linux': ['12']
   };
 
-  private static readonly ASIA_COUNTRY_CODES = [
-    "AF", "AFG", "AM", "ARM", "AZ", "AZE", "BH", "BHR", "BD", "BGD", "BT", "BTN", 
-    "MM", "MMR", "KH", "KHM", "CN", "CHN", "CY", "CYP", "GE", "GEO", "IN", "IND", 
-    "ID", "IDN", "IR", "IRN", "IQ", "IRQ", "IL", "ISR", "JP", "JPN", "JO", "JOR", 
-    "KZ", "KAZ", "KP", "PRK", "KR", "KOR", "KW", "KWT", "KG", "KGZ", "LA", "LAO", 
-    "LB", "LBN", "MY", "MYS", "MV", "MDV", "MN", "MNG", "NP", "NPL", "OM", "OMN", 
-    "PK", "PAK", "PH", "PHL", "QA", "QAT", "SA", "SAU", "SG", "SGP", "LK", "LKA", 
-    "SY", "SYR", "TJ", "TJK", "TH", "THA", "TL", "TLS", "TM", "TKM", "AE", "ARE", 
-    "UZ", "UZB", "VN", "VNM", "YE", "YEM"
-  ];
-
-  private static readonly TRACK_SERVER = process.env.TRACK_SERVER || 'https://your-track-server.com';
+  private static readonly TRACK_SERVER = process.env.TRACK_SERVER || 'http://localhost:3001';
 
   /**
    * Main installation process with comprehensive validation
@@ -71,7 +55,6 @@ export class InstallService {
     let installId: number | null = null;
 
     try {
-      // Log installation attempt
       logger.info('Starting Windows installation process:', {
         userId,
         ip,
@@ -148,11 +131,11 @@ export class InstallService {
       // Step 8: Execute installation script
       await this.executeInstallationScript(sshClient, userId, ip, winVersion, rdpPassword, installId);
 
-      // Update status to running
-      await this.updateInstallStatus(installId, 'running', 'Installation script executed successfully');
+      // Update status to pending (waiting for script execution)
+      await this.updateInstallStatus(installId, 'pending', 'Installation script sent to VPS');
 
-      // Start monitoring installation progress (optional background task)
-      this.startInstallationMonitoring(installId, userId, ip, winVersion, rdpPassword);
+      // Start monitoring installation progress
+      this.startInstallationMonitoring(installId, userId, ip);
 
       logger.info('Windows installation initiated successfully:', {
         userId,
@@ -178,6 +161,12 @@ export class InstallService {
       // Update install status to failed if we have an installId
       if (installId) {
         await this.updateInstallStatus(installId, 'failed', error.message);
+        
+        // Refund quota on failure
+        await db.run(
+          'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+          [DateUtils.nowSQLite(), userId]
+        );
       }
 
       return {
@@ -243,10 +232,10 @@ export class InstallService {
    * Step 3: Validate RDP password
    */
   private static validateRdpPassword(rdpPassword: string): InstallValidationResult {
-    if (!rdpPassword || rdpPassword.length < 4) {
+    if (!rdpPassword || rdpPassword.length <= 3) {
       return { 
         isValid: false, 
-        error: 'RDP password must be at least 4 characters', 
+        error: 'RDP password must be more than 3 characters', 
         step: 'rdp_password_validation' 
       };
     }
@@ -336,12 +325,11 @@ export class InstallService {
       const client = new Client();
       let connectionTimeout: NodeJS.Timeout;
       
-      // Set connection timeout
       connectionTimeout = setTimeout(() => {
         logger.warn('SSH connection timeout:', { ip });
         client.end();
         resolve(null);
-      }, 10000); // 10 seconds timeout
+      }, 10000);
       
       client.on('ready', () => {
         clearTimeout(connectionTimeout);
@@ -386,7 +374,6 @@ export class InstallService {
     return new Promise((resolve) => {
       let commandTimeout: NodeJS.Timeout;
       
-      // Set command timeout
       commandTimeout = setTimeout(() => {
         logger.error('OS validation command timeout');
         resolve({ 
@@ -394,7 +381,7 @@ export class InstallService {
           error: 'Timeout while checking OS information', 
           step: 'os_validation' 
         });
-      }, 10000); // 10 seconds timeout
+      }, 10000);
       
       client.exec("cat /etc/os-release | grep -E '^(NAME|VERSION_ID)='", (err, stream) => {
         if (err) {
@@ -467,8 +454,8 @@ export class InstallService {
   ): Promise<void> {
     try {
       // Get IP information for region determination
-      const ipInfo = await this.getIPInfo(ip);
-      const region = this.determineRegion(ipInfo.countryCode);
+      const ipInfo = await GeoIPService.getIPInfo(ip);
+      const region = GeoIPService.determineRegion(ipInfo.countryCode);
       
       // Generate protected download link
       const gzFilename = `${winVersion}.gz`;
@@ -480,7 +467,7 @@ export class InstallService {
         installId,
         ip,
         region,
-        gzLink: gzLink.substring(0, 100) + '...' // Log partial link for security
+        gzLink: gzLink.substring(0, 100) + '...'
       });
 
       // Create and execute installation script with progress reporting
@@ -551,49 +538,6 @@ export class InstallService {
   }
 
   /**
-   * Get IP geolocation information
-   */
-  private static async getIPInfo(ip: string): Promise<IPInfo> {
-    try {
-      // Use a free IP geolocation service
-      const response = await axios.get(`http://ip-api.com/json/${ip}`, {
-        timeout: 5000
-      });
-
-      if (response.data.status === 'success') {
-        return {
-          country: response.data.country || 'Unknown',
-          countryCode: response.data.countryCode || 'Unknown',
-          provider: response.data.org || 'Unknown'
-        };
-      }
-    } catch (error) {
-      logger.warn('Failed to get IP info, using defaults:', { ip, error });
-    }
-
-    return {
-      country: 'Unknown',
-      countryCode: 'Unknown',
-      provider: 'Unknown'
-    };
-  }
-
-  /**
-   * Determine region based on country code
-   */
-  private static determineRegion(countryCode: string): string {
-    if (countryCode === 'AU' || countryCode === 'AUS') {
-      return 'australia';
-    }
-    
-    if (this.ASIA_COUNTRY_CODES.includes(countryCode)) {
-      return 'asia';
-    }
-    
-    return 'global';
-  }
-
-  /**
    * Generate signed URL for download protection
    */
   private static generateSignedUrl(ip: string, filename: string): string {
@@ -607,7 +551,7 @@ export class InstallService {
   /**
    * Create installation script with obfuscation
    */
-  private static async createInstallationScript(gzLink: string, rdpPassword: string): Promise<Buffer> {
+  private static async createInstallationScript(gzLink: string, rdpPassword: string, installId: number): Promise<Buffer> {
     try {
       // Read the base installation script template
       const scriptPath = path.join(__dirname, '../scripts/inst.sh');
@@ -621,12 +565,15 @@ export class InstallService {
       }
 
       // Replace placeholders including progress endpoint
+      const progressEndpoint = `${this.TRACK_SERVER}/api/install/progress`;
       let modifiedContent = scriptContent
         .replace(/__GZLINK__/g, gzLink)
-        .replace(/__PASSWD__/g, rdpPassword);
+        .replace(/__PASSWD__/g, rdpPassword)
+        .replace(/__INSTALL_ID__/g, installId.toString())
+        .replace(/__PROGRESS_ENDPOINT__/g, progressEndpoint);
       
-      // Simple obfuscation (you can enhance this)
-      const obfuscated = this.obfuscateScript(modifiedContent);
+      // Obfuscate using bash-obfuscate
+      const obfuscated = await this.obfuscateScript(modifiedContent);
       
       return Buffer.from(obfuscated);
     } catch (error: any) {
@@ -636,17 +583,51 @@ export class InstallService {
   }
 
   /**
-   * Simple script obfuscation
+   * Obfuscate script using bash-obfuscate
    */
-  private static obfuscateScript(script: string): string {
-    // Basic obfuscation - encode and compress
-    const compressed = zlib.gzipSync(Buffer.from(script));
-    const encoded = compressed.toString('base64');
-    
-    // Create a wrapper that decodes and executes
-    return `#!/bin/bash
-# Obfuscated installation script
-echo "${encoded}" | base64 -d | gzip -d | bash`;
+  private static async obfuscateScript(script: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = spawn('npx', ['bash-obfuscate'], {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let output = '';
+      let errorOutput = '';
+
+      child.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+
+      child.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+      });
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve(output);
+        } else {
+          logger.error('Script obfuscation failed:', { code, errorOutput });
+          // Fallback to basic obfuscation
+          const compressed = zlib.gzipSync(Buffer.from(script));
+          const encoded = compressed.toString('base64');
+          const fallbackObfuscated = `#!/bin/bash\necho "${encoded}" | base64 -d | gzip -d | bash`;
+          resolve(fallbackObfuscated);
+        }
+      });
+
+      child.on('error', (error) => {
+        logger.error('Script obfuscation process error:', error);
+        // Fallback to basic obfuscation
+        const compressed = zlib.gzipSync(Buffer.from(script));
+        const encoded = compressed.toString('base64');
+        const fallbackObfuscated = `#!/bin/bash\necho "${encoded}" | base64 -d | gzip -d | bash`;
+        resolve(fallbackObfuscated);
+      });
+
+      // Send script to stdin
+      child.stdin.write(script);
+      child.stdin.end();
+    });
   }
 
   /**
@@ -672,11 +653,10 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
     return new Promise((resolve, reject) => {
       let executionTimeout: NodeJS.Timeout;
       
-      // Set execution timeout
       executionTimeout = setTimeout(() => {
         logger.error('Remote command execution timeout:', { userId, installId });
         reject(new Error('Installation command execution timeout'));
-      }, 30000); // 30 seconds timeout
+      }, 30000);
       
       client.exec(command, (err, stream) => {
         if (err) {
@@ -734,6 +714,133 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
   }
 
   /**
+   * Start monitoring installation progress
+   */
+  private static async startInstallationMonitoring(
+    installId: number,
+    userId: number,
+    ip: string
+  ): Promise<void> {
+    // Check if installation starts running within 2 minutes
+    setTimeout(async () => {
+      try {
+        const install = await this.getInstallById(installId);
+        
+        if (install && install.status === 'pending') {
+          // Installation hasn't started running - there's a problem
+          await this.updateInstallStatus(installId, 'failed', 'Installation failed to start within expected time');
+          
+          // Refund quota
+          const db = getDatabase();
+          await db.run(
+            'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+            [DateUtils.nowSQLite(), userId]
+          );
+          
+          // Send failure notification
+          const { NotificationService } = await import('./notificationService.js');
+          await NotificationService.notifyInstallationFailed(userId, {
+            ip,
+            winVersion: install.win_ver,
+            error: 'Installation failed to start within expected time. Please check your VPS configuration.'
+          });
+          
+          logger.warn('Installation failed to start within 2 minutes:', {
+            installId,
+            userId,
+            ip
+          });
+        }
+      } catch (error: any) {
+        logger.error('Installation monitoring (2min check) failed:', {
+          installId,
+          userId,
+          error: error.message
+        });
+      }
+    }, 2 * 60 * 1000); // 2 minutes
+
+    // Check if installation completes within 5.5 minutes (if status is running)
+    setTimeout(async () => {
+      try {
+        const install = await this.getInstallById(installId);
+        
+        if (install && install.status === 'running') {
+          // Check if Windows is accessible via RDP (port 3389)
+          const isWindowsReady = await this.checkWindowsRDP(ip);
+          
+          if (isWindowsReady) {
+            await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
+            
+            // Send completion notification
+            const { NotificationService } = await import('./notificationService.js');
+            await NotificationService.notifyInstallationCompleted(userId, {
+              ip,
+              winVersion: install.win_ver,
+              rdpPassword: install.passwd_rdp
+            });
+          }
+        }
+      } catch (error: any) {
+        logger.error('Installation monitoring (5.5min check) failed:', {
+          installId,
+          userId,
+          error: error.message
+        });
+      }
+    }, 5.5 * 60 * 1000); // 5.5 minutes
+
+    // Final check after 15 minutes - mark as needs manual review if still running
+    setTimeout(async () => {
+      try {
+        const install = await this.getInstallById(installId);
+        
+        if (install && install.status === 'running') {
+          await this.updateInstallStatus(installId, 'manual_review', 'Installation taking longer than expected - requires manual verification');
+          
+          logger.warn('Installation requires manual review:', {
+            installId,
+            userId,
+            ip,
+            duration: '15+ minutes'
+          });
+        }
+      } catch (error: any) {
+        logger.error('Installation monitoring (15min check) failed:', {
+          installId,
+          userId,
+          error: error.message
+        });
+      }
+    }, 15 * 60 * 1000); // 15 minutes
+  }
+
+  /**
+   * Check if Windows RDP is accessible
+   */
+  private static async checkWindowsRDP(ip: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = createConnection({ host: ip, port: 3389, timeout: 10000 });
+      
+      socket.on('connect', () => {
+        socket.destroy();
+        logger.info('Windows RDP is accessible:', { ip });
+        resolve(true);
+      });
+
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve(false);
+      });
+
+      socket.on('error', () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+  }
+
+  /**
    * Update installation status
    */
   static async updateInstallStatus(
@@ -755,7 +862,6 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
         timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       });
 
-      // Log status change for audit
       DatabaseSecurity.logDatabaseOperation('UPDATE_INSTALL_STATUS', 'install_data', undefined, {
         installId,
         status,
@@ -771,7 +877,7 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
   }
 
   /**
-   * Handle installation progress updates from remote script
+   * Handle installation progress updates from remote script or download tracking
    */
   static async handleProgressUpdate(
     installId: number,
@@ -780,12 +886,9 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
     message: string
   ): Promise<void> {
     try {
-      const db = getDatabase();
-      
       // Update main status
       await this.updateInstallStatus(installId, status, message);
 
-      // You can also store detailed progress in a separate table if needed
       logger.info('Installation progress updated:', {
         installId,
         step,
@@ -793,9 +896,6 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
         message,
         timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       });
-
-      // Here you can add notification logic for real-time updates
-      // For example, using WebSockets or Server-Sent Events
       
     } catch (error: any) {
       logger.error('Failed to handle progress update:', {
@@ -807,13 +907,97 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
     }
   }
 
+  /**
+   * Handle download access tracking (called when gzLink is accessed)
+   */
+  static async handleDownloadAccess(
+    ip: string,
+    filename: string,
+    userAgent: string,
+    region: string
+  ): Promise<void> {
+    try {
+      // Log download access
+      logger.info('Download access logged:', {
+        ip,
+        filename,
+        userAgent,
+        region,
+        timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
+      });
+
+      // If User-Agent contains 'wget', it means installation is running
+      if (userAgent.toLowerCase().includes('wget')) {
+        // Find the installation record by IP and update status to running
+        const db = getDatabase();
+        const install = await db.get(
+          'SELECT id, user_id, win_ver FROM install_data WHERE ip = ? AND status = ? ORDER BY created_at DESC LIMIT 1',
+          [ip, 'pending']
+        );
+
+        if (install) {
+          await this.updateInstallStatus(install.id, 'running', 'Windows installation is now running - downloading files');
+          
+          logger.info('Installation status updated to running via download tracking:', {
+            installId: install.id,
+            userId: install.user_id,
+            ip,
+            filename
+          });
+        }
+      }
+    } catch (error: any) {
+      logger.error('Failed to handle download access:', {
+        ip,
+        filename,
+        error: error.message
+      });
+    }
+  }
 
   /**
    * Get default installation script if file doesn't exist
    */
   private static getDefaultInstallScript(): string {
     return `#!/bin/bash
-...
+# Default installation script
+export tmpTARGET='__GZLINK__'
+export setNet='0'
+export AutoNet='1'
+export FORCE1STNICNAME=''
+export FORCENETCFGSTR=''
+export FORCEPASSWORD='__PASSWD__'
+
+# Progress reporting function
+report_progress() {
+    local step="$1"
+    local status="$2"
+    local message="$3"
+    
+    curl -s -X POST "__PROGRESS_ENDPOINT__" \\
+        -H "Content-Type: application/json" \\
+        -d "{\\"step\\": \\"$step\\", \\"status\\": \\"$status\\", \\"message\\": \\"$message\\", \\"installId\\": __INSTALL_ID__}" \\
+        > /dev/null 2>&1 || true
+}
+
+# Report start
+report_progress "script_start" "running" "Installation script started"
+
+# Download and execute installation
+wget -O /tmp/install.gz "$tmpTARGET" && {
+    report_progress "download_complete" "running" "Installation files downloaded"
+    cd /tmp
+    gzip -d install.gz
+    chmod +x install
+    ./install
+    report_progress "install_complete" "completed" "Installation completed, rebooting to Windows"
+} || {
+    report_progress "install_failed" "failed" "Installation failed during download or execution"
+    exit 1
+}
+
+# Reboot to Windows
+reboot -f >/dev/null 2>&1
 `;
   }
 
@@ -842,8 +1026,8 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
     try {
       const db = getDatabase();
       const installs = await db.all(
-        'SELECT * FROM install_data WHERE user_id = ? AND status IN (?, ?) ORDER BY created_at DESC',
-        [userId, 'pending', 'running']
+        'SELECT * FROM install_data WHERE user_id = ? AND status IN (?, ?, ?) ORDER BY created_at DESC',
+        [userId, 'pending', 'running', 'manual_review']
       );
       
       return installs;
@@ -879,14 +1063,15 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
       }
 
       // Update status to cancelled and refund quota
-      await db.run('BEGIN TRANSACTION');
-      
       await db.run(
         'UPDATE install_data SET status = ?, updated_at = ? WHERE id = ?',
         ['cancelled', DateUtils.nowSQLite(), installId]
       );
 
-      await db.run('COMMIT');
+      await db.run(
+        'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+        [DateUtils.nowSQLite(), userId]
+      );
 
       logger.info('Installation cancelled and quota refunded:', {
         installId,
@@ -895,114 +1080,38 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
 
       return true;
     } catch (error: any) {
-      const db = getDatabase();
-      await db.run('ROLLBACK');
-      
       logger.error('Failed to cancel installation:', {
         installId,
         userId,
         error: error.message
       });
       
-      return false;
+      throw error;
     }
   }
 
   /**
-   * Start monitoring installation progress (background task)
+   * Validate signature for download protection
    */
-  private static async startInstallationMonitoring(
-    installId: number,
-    userId: number,
-    ip: string,
-    winVersion: string,
-    rdpPassword: string
-  ): Promise<void> {
-    // This runs in the background to monitor installation progress
-    setTimeout(async () => {
-      try {
-        // Check installation status after 30 minutes
-        const install = await this.getInstallById(installId);
-        
-        if (install && install.status === 'running') {
-          // Check if Windows is accessible via RDP (port 22)
-          const isWindowsReady = await this.checkWindowsRDP(ip);
-          
-          if (isWindowsReady) {
-            await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
-            
-            // Send completion notification
-            const { NotificationService } = await import('./notificationService.js');
-            await NotificationService.notifyInstallationCompleted(userId, {
-              ip,
-              winVersion,
-              rdpPassword
-            });
-          } else {
-            // Check again after more time or mark as failed
-            setTimeout(async () => {
-              const finalCheck = await this.checkWindowsRDP(ip);
-              if (finalCheck) {
-                await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
-                
-                const { NotificationService } = await import('./notificationService.js');
-                await NotificationService.notifyInstallationCompleted(userId, {
-                  ip,
-                  winVersion,
-                  rdpPassword
-                });
-              } else {
-                await this.updateInstallStatus(installId, 'failed', 'Installation timeout - Windows did not become accessible');
-                
-                // Refund quota
-                const db = getDatabase();
-                await db.run(
-                  'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
-                  [DateUtils.nowSQLite(), userId]
-                );
-                
-                const { NotificationService } = await import('./notificationService.js');
-                await NotificationService.notifyInstallationFailed(userId, {
-                  ip,
-                  winVersion,
-                  error: 'Installation timeout - Windows did not become accessible within the expected timeframe'
-                });
-              }
-            }, 30 * 60 * 1000); // Check again after 30 more minutes
-          }
-        }
-      } catch (error: any) {
-        logger.error('Installation monitoring failed:', {
-          installId,
-          userId,
-          error: error.message
-        });
-      }
-    }, 30 * 60 * 1000); // Initial check after 30 minutes
-  }
-
-  /**
-   * Check if Windows RDP is accessible
-   */
-  private static async checkWindowsRDP(ip: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port: 22, timeout: 10000 });
+  static validateSignature(ip: string, filename: string, signature: string): boolean {
+    try {
+      const [timestampStr, sig] = signature.split('.');
+      const timestamp = parseInt(timestampStr);
       
-      socket.on('connect', () => {
-        socket.destroy();
-        logger.info('Windows RDP is accessible:', { ip });
-        resolve(true);
-      });
+      // Check expiration (6 minutes)
+      const now = Math.floor(Date.now() / 1000);
+      if (now - timestamp > 6 * 60) {
+        return false;
+      }
 
-      socket.on('timeout', () => {
-        socket.destroy();
-        resolve(false);
-      });
+      // Validate signature
+      const raw = `${ip}:${filename}:${timestamp}`;
+      const expectedSig = crypto.createHash('sha256').update(raw).digest('hex');
 
-      socket.on('error', () => {
-        socket.destroy();
-        resolve(false);
-      });
-    });
+      return sig === expectedSig;
+    } catch (error) {
+      logger.error('Signature validation failed:', error);
+      return false;
+    }
   }
 }

@@ -46,6 +46,7 @@ import { userRoutes } from './routes/user.js';
 import adminRoutes from './routes/admin.js';
 import { paymentRoutes } from './routes/payment.js';
 import { installRoutes } from './routes/install.js';
+import { downloadRoutes } from './routes/download.js';
 import { initializeDatabase } from './database/init.js';
 import { connectRedis } from './config/redis.js';
 import { logger } from './utils/logger.js';
@@ -243,6 +244,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/install', installRoutes);
+app.use('/', downloadRoutes); // Mount download routes at root level
 
 // Error handling middleware
 app.use(notFoundHandler);

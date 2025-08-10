@@ -1,0 +1,4 @@
+# This directory contains MaxMind GeoIP2 database files
+# Place your .mmdb files here:
+# - GeoLite2-Country.mmdb
+# - GeoLite2-ASN.mmdb

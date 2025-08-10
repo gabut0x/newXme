@@ -20,6 +20,7 @@ import { DateUtils } from '../utils/dateUtils.js';
 import { DatabaseSecurity } from '../utils/dbSecurity.js';
 
 import { NotificationService } from '../services/notificationService.js';
+import { InstallService } from '../services/installService.js';
 const router = express.Router();
 
 // Apply security middleware to all routes
@@ -399,10 +400,7 @@ router.post('/install',
     }
 
     const validatedData = req.body;
-    const db = getDatabase();
 
-    // Import InstallService for comprehensive validation and processing
-    const { InstallService } = await import('../services/installService.js');
     
     // Process installation with comprehensive validation
     const result = await InstallService.processInstallation(

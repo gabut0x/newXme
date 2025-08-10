@@ -11,6 +11,7 @@ import {
 import { auditLogger } from '../middleware/security.js';
 import { installDataSchema } from '../types/user.js';
 import { logger } from '../utils/logger.js';
+import { InstallService } from '../services/installService.js';
 import { z } from 'zod';
 
 const router = express.Router();
@@ -128,15 +129,7 @@ router.post('/cancel/:id',
         return;
       }
 
-      const cancelled = await InstallService.cancelInstallation(installId, req.user.id);
-      
-      if (!cancelled) {
-        res.status(400).json({
-          success: false,
-          message: 'Installation cannot be cancelled'
-        });
-        return;
-      }
+      await InstallService.cancelInstallation(installId, req.user.id);
 
       res.json({
         success: true,
@@ -146,7 +139,8 @@ router.post('/cancel/:id',
       logger.error('Failed to cancel installation:', error);
       res.status(500).json({
         success: false,
-        message: error.message || 'Failed to cancel installation'
+        message: error.message || 'Failed to cancel installation',
+        error: 'CANCELLATION_FAILED'
       });
     }
   })
@@ -183,6 +177,48 @@ router.get('/active',
         error: error.message
       });
     }
+  })
+);
+
+// Create new install request
+router.post('/install',
+  authenticateToken,
+  requireVerifiedUser,
+  validateRequest(installDataSchema),
+  auditLogger('CREATE_INSTALL'),
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+
+    const validatedData = req.body;
+    
+    // Process installation with comprehensive validation
+    const result = await InstallService.processInstallation(
+      req.user.id,
+      validatedData.ip,
+      validatedData.passwd_vps || '',
+      validatedData.win_ver,
+      validatedData.passwd_rdp || ''
+    );
+
+    if (!result.success) {
+      res.status(400).json({
+        success: false,
+        message: result.message,
+        error: 'INSTALLATION_VALIDATION_FAILED'
+      } as ApiResponse);
+      return;
+    }
+
+    // Get the created install data
+    const installData = await InstallService.getInstallById(result.installId!);
+
+    res.status(201).json({
+      success: true,
+      message: result.message,
+      data: installData
+    } as ApiResponse);
   })
 );
 

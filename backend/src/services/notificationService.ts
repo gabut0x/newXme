@@ -135,12 +135,13 @@ The XME Projects Team
             <div class="credentials">
                 <h3>🔐 RDP Connection Details</h3>
                 <p><strong>IP Address:</strong> ${data.ip}</p>
+                <p><strong>Port:</strong> 3389</p>
                 <p><strong>Username:</strong> Administrator</p>
                 <p><strong>Password:</strong> ${data.rdpPassword}</p>
             </div>
             
             <div class="warning">
-                <strong>⏰ Please Note:</strong> Allow 5-10 minutes for Windows to fully boot up before attempting to connect via RDP.
+                <strong>⏰ Please Note:</strong> Allow 2-5 minutes for Windows to fully boot up before attempting to connect via RDP.
             </div>
             
             <p>You can now connect to your Windows desktop using any RDP client with the credentials provided above.</p>
