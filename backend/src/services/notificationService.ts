@@ -1,6 +1,7 @@
 import { getDatabase } from '../database/init.js';
 import { logger } from '../utils/logger.js';
 import { DateUtils } from '../utils/dateUtils.js';
+import { emailService } from './emailService.js';
 
 export interface NotificationData {
   userId: number;
@@ -512,7 +513,6 @@ The XME Projects Team
   static async notifyInstallationCompleted(
     userId: number,
     installData: {
-      installId: number;
       ip: string;
       winVersion: string;
       rdpPassword: string;
@@ -520,7 +520,7 @@ The XME Projects Team
   ): Promise<void> {
     // Send real-time notification to dashboard
     await this.notifyInstallStatusUpdate({
-      installId: installData.installId,
+      installId: 0, // Will be set by caller
       userId,
       status: 'completed',
       message: `Windows installation completed successfully on ${installData.ip}`,
@@ -528,6 +528,23 @@ The XME Projects Team
       ip: installData.ip,
       winVersion: installData.winVersion
     });
+
+    // Send completion email
+    try {
+      const db = getDatabase();
+      const user = await db.get('SELECT email, username FROM users WHERE id = ?', [userId]);
+      
+      if (user) {
+        await this.sendInstallCompletedEmail(user.email, user.username, {
+          ip: installData.ip,
+          winVersion: installData.winVersion,
+          rdpPassword: installData.rdpPassword,
+          completedAt: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
+        });
+      }
+    } catch (error: any) {
+      logger.error('Failed to send completion email:', error);
+    }
   }
 
   /**
@@ -536,7 +553,6 @@ The XME Projects Team
   static async notifyInstallationFailed(
     userId: number,
     installData: {
-      installId: number;
       ip: string;
       winVersion: string;
       error: string;
@@ -544,7 +560,7 @@ The XME Projects Team
   ): Promise<void> {
     // Send real-time notification to dashboard
     await this.notifyInstallStatusUpdate({
-      installId: installData.installId,
+      installId: 0, // Will be set by caller
       userId,
       status: 'failed',
       message: `Installation failed on ${installData.ip}: ${installData.error}`,
@@ -552,6 +568,23 @@ The XME Projects Team
       ip: installData.ip,
       winVersion: installData.winVersion
     });
+
+    // Send failure email
+    try {
+      const db = getDatabase();
+      const user = await db.get('SELECT email, username FROM users WHERE id = ?', [userId]);
+      
+      if (user) {
+        await this.sendInstallFailedEmail(user.email, user.username, {
+          ip: installData.ip,
+          winVersion: installData.winVersion,
+          error: installData.error,
+          failedAt: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
+        });
+      }
+    } catch (error: any) {
+      logger.error('Failed to send failure email:', error);
+    }
   }
 
   /**

@@ -713,6 +713,8 @@ export class InstallService {
           await NotificationService.notifyInstallationFailed(userId, {
             installId,
             installId,
+            installId,
+            installId,
             ip,
             winVersion: install.win_ver,
             error: 'Installation failed to start within expected time. Please check your VPS configuration.'

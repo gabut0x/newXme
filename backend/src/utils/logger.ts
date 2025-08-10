@@ -1,16 +1,24 @@
 import fs from 'fs';
 import path from 'path';
 import { DateUtils } from './dateUtils.js';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Simple logger utility
 export class Logger {
   private logDir: string;
   private logFile: string;
+  private errorLogFile: string;
+  private accessLogFile: string;
   private isDevelopment: boolean;
 
   constructor() {
-    this.logDir = path.join(process.cwd(), 'logs');
+    this.logDir = path.join(__dirname, '../../logs');
     this.logFile = path.join(this.logDir, 'app.log');
+    this.errorLogFile = path.join(this.logDir, 'error.log');
+    this.accessLogFile = path.join(this.logDir, 'access.log');
     this.isDevelopment = process.env.NODE_ENV === 'development';
     this.ensureLogDirectory();
   }
@@ -27,9 +35,10 @@ export class Logger {
     return `[${timestamp} WIB] ${level.toUpperCase()}: ${message}${metaStr}\n`;
   }
 
-  private writeToFile(formattedMessage: string): void {
+  private writeToFile(formattedMessage: string, logFile?: string): void {
     try {
-      fs.appendFileSync(this.logFile, formattedMessage);
+      const targetFile = logFile || this.logFile;
+      fs.appendFileSync(targetFile, formattedMessage);
     } catch (error) {
       console.error('Failed to write to log file:', error);
     }
@@ -47,9 +56,17 @@ export class Logger {
       console.log(formattedMessage.trim());
     }
 
-    // Write to file in development for debugging, and always in production
-    if (this.isDevelopment || process.env.NODE_ENV === 'production') {
-      this.writeToFile(formattedMessage);
+    // Write to appropriate log files
+    this.writeToFile(formattedMessage, this.logFile);
+    
+    // Write errors to separate error log
+    if (level === 'error') {
+      this.writeToFile(formattedMessage, this.errorLogFile);
+    }
+    
+    // Write access logs to separate file if it's a request log
+    if (meta && (meta.method || meta.url || meta.statusCode)) {
+      this.writeToFile(formattedMessage, this.accessLogFile);
     }
   }
 
@@ -69,6 +86,19 @@ export class Logger {
     if (process.env.NODE_ENV === 'development') {
       this.log('debug', message, meta);
     }
+  }
+
+  // Specific log methods for different types
+  access(message: string, meta?: any): void {
+    const formattedMessage = this.formatMessage('access', message, meta);
+    this.writeToFile(formattedMessage, this.accessLogFile);
+  }
+
+  security(message: string, meta?: any): void {
+    const formattedMessage = this.formatMessage('security', message, meta);
+    this.writeToFile(formattedMessage, this.logFile);
+    this.writeToFile(formattedMessage, this.errorLogFile);
+    console.warn(formattedMessage.trim());
   }
 }
 

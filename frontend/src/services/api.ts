@@ -44,11 +44,12 @@ export interface DashboardData {
   stats: {
     totalVPS: number;
     activeConnections: number;
-    dataTransfer: string;
-    uptime: string;
+    completedInstalls: number;
+    failedInstalls: number;
+    successRate: string;
+    quota: number;
   };
   recentActivity: any[];
-  notifications: Notification[];
 }
 
 export interface Notification {
@@ -379,9 +380,18 @@ class ApiService {
 
   // Real-time notifications
   createNotificationStream(userId: number, onNotification: (notification: any) => void): EventSource {
-    const eventSource = new EventSource(`${this.api.defaults.baseURL}/user/notifications/stream`, {
-      withCredentials: true
-    });
+    const token = this.getAuthToken();
+    if (!token) {
+      throw new Error('No authentication token available');
+    }
+    
+    const baseURL = this.api.defaults.baseURL;
+    
+    // Create URL with auth token as query parameter since EventSource can't send custom headers
+    const url = new URL(`${baseURL}/user/notifications/stream`);
+    url.searchParams.set('token', token);
+    
+    const eventSource = new EventSource(url.toString());
 
     eventSource.onmessage = (event) => {
       try {

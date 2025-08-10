@@ -352,7 +352,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
   );
 
   if (hasSuspiciousContent) {
-    logger.error('Suspicious request detected:', {
+    logger.security('Suspicious request detected:', {
       method: req.method,
       url: req.originalUrl,
       ip,
@@ -380,7 +380,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
     if (res.statusCode >= 400) {
       logger.error('Request failed:', logData);
     } else {
-      logger.info('Request completed:', logData);
+      logger.access('Request completed:', logData);
     }
   });
 

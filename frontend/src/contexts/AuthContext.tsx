@@ -286,7 +286,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Setup real-time notifications when user is authenticated
   useEffect(() => {
-    if (state.isAuthenticated && state.user && !notificationStream) {
+    if (state.isAuthenticated && state.user && state.user.is_verified && !notificationStream) {
       const stream = apiService.createNotificationStream(state.user.id, (notification) => {
         if (notification.type !== 'heartbeat' && notification.type !== 'connection') {
           addNotification(notification);
@@ -294,7 +294,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       });
       
       setNotificationStream(stream);
-    } else if (!state.isAuthenticated && notificationStream) {
+    } else if ((!state.isAuthenticated || !state.user?.is_verified) && notificationStream) {
       notificationStream.close();
       setNotificationStream(null);
     }
@@ -304,7 +304,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         notificationStream.close();
       }
     };
-  }, [state.isAuthenticated, state.user, addNotification]);
+  }, [state.isAuthenticated, state.user?.is_verified, addNotification]);
 
   // Check auth on mount
   useEffect(() => {

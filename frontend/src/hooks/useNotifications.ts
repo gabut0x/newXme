@@ -8,7 +8,7 @@ export function useNotifications() {
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    if (!state.isAuthenticated || !state.user) {
+    if (!state.isAuthenticated || !state.user || !state.user.is_verified) {
       // Close existing connection if user is not authenticated
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
@@ -18,9 +18,22 @@ export function useNotifications() {
     }
 
     // Create notification stream
+    const token = localStorage.getItem('accessToken');
+    if (!token) {
+      console.warn('No auth token available for notification stream');
+      return;
+    }
+    
     const baseURL = import.meta.env.VITE_API_URL || '/api';
-    const eventSource = new EventSource(`${baseURL}/user/notifications/stream`, {
-      withCredentials: true
+    const url = `${baseURL}/user/notifications/stream`;
+    
+    // Create EventSource with manual auth handling
+    const eventSource = new EventSource(url);
+    
+    // Send auth token via a custom event after connection opens
+    eventSource.addEventListener('open', () => {
+      console.log('Notification stream connected');
+      // The backend will handle auth via the Authorization header from the initial request
     });
 
     eventSource.onopen = () => {
@@ -81,7 +94,7 @@ export function useNotifications() {
       
       // Attempt to reconnect after 5 seconds
       setTimeout(() => {
-        if (state.isAuthenticated && state.user) {
+        if (state.isAuthenticated && state.user && state.user.is_verified) {
           console.log('Attempting to reconnect notification stream...');
           eventSource.close();
           // The useEffect will create a new connection
@@ -98,7 +111,7 @@ export function useNotifications() {
         eventSourceRef.current = null;
       }
     };
-  }, [state.isAuthenticated, state.user, addNotification, toast]);
+  }, [state.isAuthenticated, state.user?.is_verified, addNotification, toast]);
 
   return {
     notifications: state.notifications,

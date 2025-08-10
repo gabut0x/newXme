@@ -29,12 +29,75 @@ router.use(sqlInjectionProtection);
 
 // Real-time notifications endpoint (Server-Sent Events)
 router.get('/notifications/stream',
-  authenticateToken,
   asyncHandler(async (req: Request, res: Response) => {
-    if (!req.user) {
+    // Handle authentication for EventSource (which can't send custom headers)
+    const authHeader = req.headers.authorization;
+    const tokenFromHeader = authHeader && authHeader.split(' ')[1];
+    const tokenFromQuery = req.query.token as string;
+    const token = tokenFromHeader || tokenFromQuery;
+    
+    if (!token) {
       res.status(401).json({
         success: false,
-        message: 'Authentication required'
+        message: 'Access token required',
+        error: 'MISSING_TOKEN'
+      });
+      return;
+    }
+    
+    // Verify token manually since we can't use middleware with EventSource
+    let user;
+    try {
+      const { AuthUtils } = await import('../utils/auth.js');
+      const { UserService } = await import('../services/userService.js');
+      
+      // Check if token is blacklisted
+      const isBlacklisted = await AuthUtils.isTokenBlacklisted(token);
+      if (isBlacklisted) {
+        res.status(401).json({
+          success: false,
+          message: 'Token has been revoked',
+          error: 'TOKEN_REVOKED'
+        });
+        return;
+      }
+
+      // Verify token
+      const decoded = AuthUtils.verifyToken(token);
+
+      // Get user from database
+      const userData = await UserService.getUserById(decoded.userId);
+      if (!userData || !userData.is_active) {
+        res.status(401).json({
+          success: false,
+          message: 'User not found or inactive',
+          error: 'USER_INACTIVE'
+        });
+        return;
+      }
+      
+      if (!userData.is_verified) {
+        res.status(403).json({
+          success: false,
+          message: 'Email verification required',
+          error: 'EMAIL_NOT_VERIFIED'
+        });
+        return;
+      }
+      
+      user = {
+        id: userData.id,
+        username: userData.username,
+        email: userData.email,
+        isVerified: userData.is_verified,
+        admin: userData.admin
+      };
+    } catch (error: any) {
+      logger.error('Notification stream authentication error:', error);
+      res.status(401).json({
+        success: false,
+        message: 'Invalid token',
+        error: 'INVALID_TOKEN'
       });
       return;
     }
@@ -57,18 +120,18 @@ router.get('/notifications/stream',
     })}\n\n`);
 
     // Register user for notifications
-    const unregister = NotificationService.registerUser(req.user.id, (notification) => {
+    const unregister = NotificationService.registerUser(user.id, (notification) => {
       res.write(`data: ${JSON.stringify(notification)}\n\n`);
     });
 
     // Handle client disconnect
     req.on('close', () => {
       unregister();
-      logger.info('User disconnected from notification stream:', { userId: req.user?.id });
+      logger.info('User disconnected from notification stream:', { userId: user.id });
     });
 
     req.on('error', (error) => {
-      logger.error('Notification stream error:', { userId: req.user?.id, error });
+      logger.error('Notification stream error:', { userId: user.id, error });
       unregister();
     });
 
@@ -342,6 +405,7 @@ router.put('/profile',
 // Get dashboard data
 router.get('/dashboard',
   authenticateToken,
+  requireVerifiedUser,
   asyncHandler(async (req: Request, res: Response) => {
     if (!req.user) {
       throw new NotFoundError('User not found');
@@ -358,17 +422,18 @@ router.get('/dashboard',
       WHERE u.id = ?
     `, [req.user.id]);
 
-    // Get user's install data count
-    const installCount = await db.get(
-      'SELECT COUNT(*) as count FROM install_data WHERE user_id = ?',
-      [req.user.id]
-    );
+    // Get comprehensive installation statistics
+    const [totalInstalls, activeInstalls, completedInstalls, failedInstalls] = await Promise.all([
+      db.get('SELECT COUNT(*) as count FROM install_data WHERE user_id = ?', [req.user.id]),
+      db.get('SELECT COUNT(*) as count FROM install_data WHERE user_id = ? AND status IN (?, ?, ?)', [req.user.id, 'pending', 'running', 'manual_review']),
+      db.get('SELECT COUNT(*) as count FROM install_data WHERE user_id = ? AND status = ?', [req.user.id, 'completed']),
+      db.get('SELECT COUNT(*) as count FROM install_data WHERE user_id = ? AND status IN (?, ?)', [req.user.id, 'failed', 'cancelled'])
+    ]);
 
-    // Get user's active installations
-    const activeInstalls = await db.get(
-      'SELECT COUNT(*) as count FROM install_data WHERE user_id = ? AND status IN (?, ?)',
-      [req.user.id, 'pending', 'running']
-    );
+    // Calculate success rate
+    const successRate = totalInstalls.count > 0 
+      ? Math.round((completedInstalls.count / totalInstalls.count) * 100)
+      : 0;
 
     // Get recent install data
     const recentInstalls = await db.all(
@@ -401,29 +466,17 @@ router.get('/dashboard',
       profile
     };
 
-    // Create notifications
-    // Need edit this
-    const notifications = [
-      {
-        id: 1,
-        type: 'info',
-        title: 'Welcome to XME Projects',
-        message: 'Start by installing Windows on your VPS',
-        timestamp: new Date().toISOString(),
-        read: false
-      }
-    ];
-
     const dashboardData = {
       user: userData,
       stats: {
-        totalVPS: installCount.count,
+        totalVPS: totalInstalls.count,
         activeConnections: activeInstalls.count,
-        dataTransfer: '0 GB',
-        uptime: '0%'
+        completedInstalls: completedInstalls.count,
+        failedInstalls: failedInstalls.count,
+        successRate: `${successRate}%`,
+        quota: user.quota
       },
-      recentActivity: recentInstalls,
-      notifications
+      recentActivity: recentInstalls
     };
 
     res.json({
