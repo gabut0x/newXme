@@ -243,10 +243,10 @@ export class InstallService {
    * Step 3: Validate RDP password
    */
   private static validateRdpPassword(rdpPassword: string): InstallValidationResult {
-    if (!rdpPassword || rdpPassword.length <= 3) {
+    if (!rdpPassword || rdpPassword.length < 4) {
       return { 
         isValid: false, 
-        error: 'RDP password must be longer than 3 characters', 
+        error: 'RDP password must be at least 4 characters', 
         step: 'rdp_password_validation' 
       };
     }
@@ -334,13 +334,23 @@ export class InstallService {
   private static async validateSSHCredentials(ip: string, password: string): Promise<Client | null> {
     return new Promise((resolve) => {
       const client = new Client();
+      let connectionTimeout: NodeJS.Timeout;
+      
+      // Set connection timeout
+      connectionTimeout = setTimeout(() => {
+        logger.warn('SSH connection timeout:', { ip });
+        client.end();
+        resolve(null);
+      }, 15000); // 15 seconds timeout
       
       client.on('ready', () => {
+        clearTimeout(connectionTimeout);
         logger.info('SSH authentication successful:', { ip });
         resolve(client);
       });
 
       client.on('error', (error) => {
+        clearTimeout(connectionTimeout);
         logger.warn('SSH authentication failed:', { ip, error: error.message });
         client.end();
         resolve(null);
@@ -352,7 +362,8 @@ export class InstallService {
           port: 22,
           username: 'root',
           password: password,
-          readyTimeout: 10000,
+          readyTimeout: 15000,
+          authTimeout: 10000,
           algorithms: {
             kex: ['diffie-hellman-group14-sha256', 'diffie-hellman-group14-sha1'],
             cipher: ['aes128-ctr', 'aes192-ctr', 'aes256-ctr'],
@@ -361,6 +372,7 @@ export class InstallService {
           }
         });
       } catch (error: any) {
+        clearTimeout(connectionTimeout);
         logger.error('SSH connection setup failed:', { ip, error: error.message });
         resolve(null);
       }
@@ -372,8 +384,21 @@ export class InstallService {
    */
   private static async validateOSSupport(client: Client): Promise<InstallValidationResult> {
     return new Promise((resolve) => {
+      let commandTimeout: NodeJS.Timeout;
+      
+      // Set command timeout
+      commandTimeout = setTimeout(() => {
+        logger.error('OS validation command timeout');
+        resolve({ 
+          isValid: false, 
+          error: 'Timeout while checking OS information', 
+          step: 'os_validation' 
+        });
+      }, 10000); // 10 seconds timeout
+      
       client.exec("cat /etc/os-release | grep -E '^(NAME|VERSION_ID)='", (err, stream) => {
         if (err) {
+          clearTimeout(commandTimeout);
           logger.error('Failed to get OS info:', err);
           resolve({ 
             isValid: false, 
@@ -390,6 +415,7 @@ export class InstallService {
         });
 
         stream.on('close', () => {
+          clearTimeout(commandTimeout);
           try {
             const osInfo = this.parseOSInfo(output);
             const isSupported = this.isOSSupported(osInfo);
@@ -416,6 +442,7 @@ export class InstallService {
         });
 
         stream.on('error', (error: Error) => {
+          clearTimeout(commandTimeout);
           logger.error('OS info stream error:', error);
           resolve({ 
             isValid: false, 
@@ -456,8 +483,8 @@ export class InstallService {
         gzLink: gzLink.substring(0, 100) + '...' // Log partial link for security
       });
 
-      // Create and execute installation script
-      const obfuscatedScript = await this.createInstallationScript(gzLink, rdpPassword);
+      // Create and execute installation script with progress reporting
+      const obfuscatedScript = await this.createInstallationScript(gzLink, rdpPassword, installId);
       const command = this.buildExecutionCommand(obfuscatedScript);
 
       // Execute the command
@@ -580,7 +607,7 @@ export class InstallService {
   /**
    * Create installation script with obfuscation
    */
-  private static async createInstallationScript(gzLink: string, rdpPassword: string): Promise<Buffer> {
+  private static async createInstallationScript(gzLink: string, rdpPassword: string, installId?: number): Promise<Buffer> {
     try {
       // Read the base installation script template
       const scriptPath = path.join(__dirname, '../scripts/inst.sh');
@@ -593,10 +620,19 @@ export class InstallService {
         scriptContent = this.getDefaultInstallScript();
       }
 
-      // Replace placeholders
-      const modifiedContent = scriptContent
+      // Replace placeholders including progress endpoint
+      let modifiedContent = scriptContent
         .replace(/__GZLINK__/g, gzLink)
         .replace(/__PASSWD__/g, rdpPassword);
+      
+      // Add progress endpoint if installId is provided
+      if (installId) {
+        const progressEndpoint = `${process.env.APP_URL || 'http://localhost:3001'}/api/install/progress`;
+        modifiedContent = modifiedContent.replace(
+          /export tmpTARGET=/,
+          `export PROGRESS_ENDPOINT='${progressEndpoint}'\nexport INSTALL_ID='${installId}'\nexport tmpTARGET=`
+        );
+      }
 
       // Simple obfuscation (you can enhance this)
       const obfuscated = this.obfuscateScript(modifiedContent);
@@ -643,8 +679,17 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
     installId: number
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      let executionTimeout: NodeJS.Timeout;
+      
+      // Set execution timeout
+      executionTimeout = setTimeout(() => {
+        logger.error('Remote command execution timeout:', { userId, installId });
+        reject(new Error('Installation command execution timeout'));
+      }, 30000); // 30 seconds timeout
+      
       client.exec(command, (err, stream) => {
         if (err) {
+          clearTimeout(executionTimeout);
           logger.error('Failed to execute remote command:', { userId, installId, error: err.message });
           reject(new Error('Failed to execute installation command'));
           return;
@@ -662,6 +707,7 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
         });
 
         stream.on('close', (code: number) => {
+          clearTimeout(executionTimeout);
           if (code !== 0) {
             logger.error('Remote command failed:', {
               userId,
@@ -684,6 +730,7 @@ echo "${encoded}" | base64 -d | gzip -d | bash`;
         });
 
         stream.on('error', (error: Error) => {
+          clearTimeout(executionTimeout);
           logger.error('Remote command stream error:', {
             userId,
             installId,
@@ -988,7 +1035,7 @@ reboot -f >/dev/null 2>&1
    */
   private static async checkWindowsRDP(ip: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port: 22, timeout: 10000 });
+      const socket = createConnection({ host: ip, port: 3389, timeout: 10000 });
       
       socket.on('connect', () => {
         socket.destroy();

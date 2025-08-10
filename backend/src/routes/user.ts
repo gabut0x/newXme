@@ -401,73 +401,34 @@ router.post('/install',
     const validatedData = req.body;
     const db = getDatabase();
 
-    // Additional security validation for install data
-    if (!validatedData.ip || !validatedData.win_ver) {
-      throw new BadRequestError('Missing required installation parameters');
-    }
-
-    // Validate IP format (basic IPv4 validation)
-    const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-    if (!ipRegex.test(validatedData.ip)) {
-      throw new BadRequestError('Invalid IP address format');
-    }
-
-    // Check user quota first
-    const hasQuota = await UserService.checkQuotaForInstallation(req.user.id);
-    if (!hasQuota) {
-      res.status(400).json({
-        success: false,
-        message: 'Insufficient quota',
-        error: 'Your quota is insufficient for Windows installation. Please top up your quota to proceed.'
-      });
-      return;
-    }
-
-    // Deduct quota before creating install request
-    const quotaDeducted = await UserService.decrementUserQuota(req.user.id, 1);
-    if (!quotaDeducted) {
-      res.status(400).json({
-        success: false,
-        message: 'Insufficient quota',
-        error: 'Your quota is insufficient for Windows installation. Please top up your quota to proceed.'
-      });
-      return;
-    }
-
-    // Log install creation for audit
-    DatabaseSecurity.logDatabaseOperation('CREATE_INSTALL', 'install_data', req.user.id, {
-      ip: validatedData.ip,
-      win_ver: validatedData.win_ver
-    });
+    // Import InstallService for comprehensive validation and processing
+    const { InstallService } = await import('../services/installService.js');
     
-    // Create new install request
-    const result = await db.run(`
-      INSERT INTO install_data (user_id, ip, passwd_vps, win_ver, passwd_rdp, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
+    // Process installation with comprehensive validation
+    const result = await InstallService.processInstallation(
       req.user.id,
       validatedData.ip,
-      validatedData.passwd_vps || null,
+      validatedData.passwd_vps || '',
       validatedData.win_ver,
-      validatedData.passwd_rdp || null,
-      'pending',
-      DateUtils.nowSQLite(),
-      DateUtils.nowSQLite()
-    ]);
+      validatedData.passwd_rdp || ''
+    );
 
-    const newInstall = await db.get('SELECT * FROM install_data WHERE id = ?', [result.lastID]);
+    if (!result.success) {
+      res.status(400).json({
+        success: false,
+        message: result.message,
+        error: 'INSTALLATION_VALIDATION_FAILED'
+      } as ApiResponse);
+      return;
+    }
 
-    logger.info('Install request created:', {
-      userId: req.user.id,
-      installId: result.lastID,
-      ip: validatedData.ip,
-      quotaDeducted: 1
-    });
+    // Get the created install data
+    const installData = await InstallService.getInstallById(result.installId!);
 
     res.status(201).json({
       success: true,
-      message: 'Install request created successfully',
-      data: newInstall
+      message: result.message,
+      data: installData
     } as ApiResponse);
   })
 );

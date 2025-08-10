@@ -82,12 +82,19 @@ export const installDataSchema = z.object({
     .min(1, 'IP address is required')
     .max(45, 'IP address must be less than 45 characters')
     .regex(/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/, 'Invalid IPv4 address format'),
-  passwd_vps: z.string().max(255, 'VPS password must be less than 255 characters').optional(),
+  passwd_vps: z.string()
+    .min(1, 'VPS password is required')
+    .max(255, 'VPS password must be less than 255 characters'),
   win_ver: z.string()
     .min(1, 'Windows version is required')
     .max(10, 'Windows version must be less than 10 characters')
     .regex(/^[a-z0-9-_]+$/, 'Windows version can only contain lowercase letters, numbers, hyphens, and underscores'),
-  passwd_rdp: z.string().max(255, 'RDP password must be less than 255 characters').optional(),
+  passwd_rdp: z.string()
+    .min(4, 'RDP password must be at least 4 characters')
+    .max(255, 'RDP password must be less than 255 characters')
+    .refine((password) => !password.startsWith('#'), {
+      message: 'RDP password cannot start with "#" character'
+    }),
 });
 
 // User interfaces

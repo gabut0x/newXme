@@ -43,7 +43,9 @@ import {
   ChevronRight,
   Menu,
   X,
-  QrCode
+  QrCode,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -97,6 +99,8 @@ export default function UserDashboardPage() {
   const [selectedTransaction, setSelectedTransaction] = useState<TopupTransaction | null>(null);
   const [showTransactionDetails, setShowTransactionDetails] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showVpsPassword, setShowVpsPassword] = useState(false);
+  const [showRdpPassword, setShowRdpPassword] = useState(false);
   
   // Pagination states
   const [installHistoryPage, setInstallHistoryPage] = useState(1);
@@ -778,14 +782,30 @@ export default function UserDashboardPage() {
 
                         <div className="space-y-2">
                           <Label htmlFor="passwd_vps">VPS Password *</Label>
-                          <Input
-                            id="passwd_vps"
-                            type="password"
-                            placeholder="Enter VPS password"
-                            value={installForm.passwd_vps}
-                            onChange={(e) => setInstallForm(prev => ({ ...prev, passwd_vps: e.target.value }))}
-                            required
-                          />
+                          <div className="relative">
+                            <Input
+                              id="passwd_vps"
+                              type={showVpsPassword ? 'text' : 'password'}
+                              placeholder="Enter VPS password"
+                              value={installForm.passwd_vps}
+                              onChange={(e) => setInstallForm(prev => ({ ...prev, passwd_vps: e.target.value }))}
+                              className="pr-10"
+                              required
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                              onClick={() => setShowVpsPassword(!showVpsPassword)}
+                            >
+                              {showVpsPassword ? (
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
 
                         <div className="space-y-2">
@@ -810,14 +830,30 @@ export default function UserDashboardPage() {
 
                         <div className="space-y-2">
                           <Label htmlFor="passwd_rdp">RDP Password *</Label>
-                          <Input
-                            id="passwd_rdp"
-                            type="password"
-                            placeholder="Enter RDP password"
-                            value={installForm.passwd_rdp}
-                            onChange={(e) => setInstallForm(prev => ({ ...prev, passwd_rdp: e.target.value }))}
-                            required
-                          />
+                          <div className="relative">
+                            <Input
+                              id="passwd_rdp"
+                              type={showRdpPassword ? 'text' : 'password'}
+                              placeholder="Enter RDP password"
+                              value={installForm.passwd_rdp}
+                              onChange={(e) => setInstallForm(prev => ({ ...prev, passwd_rdp: e.target.value }))}
+                              className="pr-10"
+                              required
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                              onClick={() => setShowRdpPassword(!showRdpPassword)}
+                            >
+                              {showRdpPassword ? (
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
                       </div>
 
@@ -875,6 +911,7 @@ export default function UserDashboardPage() {
                           <Table>
                             <TableHeader>
                               <TableRow>
+                                <TableHead className="w-12">#</TableHead>
                                 <TableHead>IP Address</TableHead>
                                 <TableHead>Windows Version</TableHead>
                                 <TableHead>Status</TableHead>
@@ -882,10 +919,15 @@ export default function UserDashboardPage() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {paginatedInstallHistory.map((install) => (
+                              {paginatedInstallHistory.map((install, index) => (
                                 <TableRow key={install.id}>
+                                  <TableCell className="font-medium">
+                                    {((installHistoryPage - 1) * ITEMS_PER_PAGE) + index + 1}
+                                  </TableCell>
                                   <TableCell className="font-mono">{install.ip}</TableCell>
-                                  <TableCell>{install.win_ver}</TableCell>
+                                  <TableCell>
+                                    {windowsVersions.find(v => v.slug === install.win_ver)?.name || install.win_ver}
+                                  </TableCell>
                                   <TableCell>{getStatusBadge(install.status)}</TableCell>
                                   <TableCell>
                                     {new Date(install.created_at).toLocaleDateString()}

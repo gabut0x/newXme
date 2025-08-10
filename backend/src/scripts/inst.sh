@@ -3,6 +3,8 @@
 # This script will download and install Windows on your VPS
 
 # Configuration variables (will be replaced by the service)
+export PROGRESS_ENDPOINT='__PROGRESS_ENDPOINT__'
+export INSTALL_ID='__INSTALL_ID__'
 export tmpTARGET='__GZLINK__'
 export setNet='0'
 export AutoNet='1'
@@ -17,9 +19,9 @@ report_progress() {
     local message="$3"
     
     # Send progress update to server (you'll need to implement this endpoint)
-    curl -X POST "${PROGRESS_ENDPOINT:-http://localhost:3001/api/install/progress}" \
+    curl -X POST "${PROGRESS_ENDPOINT}" \
          -H "Content-Type: application/json" \
-         -d "{\"step\":\"$step\",\"status\":\"$status\",\"message\":\"$message\"}" \
+        -d "{\"step\":\"$step\",\"status\":\"$status\",\"message\":\"$message\",\"installId\":${INSTALL_ID}}" \
          --connect-timeout 5 --max-time 10 >/dev/null 2>&1 || true
 }
 
