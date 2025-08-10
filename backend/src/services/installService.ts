@@ -277,7 +277,7 @@ export class InstallService {
       };
     }
 
-    // Additional validation for private/reserved IPs
+    // Additional validation for reserved IPs
     const parts = ip.split('.').map(Number);
     
     // Check for localhost
@@ -287,19 +287,6 @@ export class InstallService {
         error: 'Localhost IP addresses are not allowed', 
         step: 'ipv4_validation' 
       };
-    }
-
-    // Check for private networks (optional - remove if you want to allow private IPs)
-    const isPrivate = (
-      (parts[0] === 10) ||
-      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
-      (parts[0] === 192 && parts[1] === 168)
-    );
-
-    if (isPrivate) {
-      logger.warn('Private IP address detected:', { ip });
-      // You can choose to allow or disallow private IPs
-      // return { isValid: false, error: 'Private IP addresses are not allowed', step: 'ipv4_validation' };
     }
 
     logger.info('IPv4 validation passed:', { ip });
@@ -549,7 +536,7 @@ export class InstallService {
       if (response.data.status === 'success') {
         return {
           country: response.data.country || 'Unknown',
-          countryCode: response.data.countryCode || 'SG',
+          countryCode: response.data.countryCode || 'Unknown',
           provider: response.data.org || 'Unknown'
         };
       }
@@ -559,7 +546,7 @@ export class InstallService {
 
     return {
       country: 'Unknown',
-      countryCode: 'SG',
+      countryCode: 'Unknown',
       provider: 'Unknown'
     };
   }
@@ -940,7 +927,7 @@ reboot -f >/dev/null 2>&1
         const install = await this.getInstallById(installId);
         
         if (install && install.status === 'running') {
-          // Check if Windows is accessible via RDP (port 3389)
+          // Check if Windows is accessible via RDP (port 22)
           const isWindowsReady = await this.checkWindowsRDP(ip);
           
           if (isWindowsReady) {
@@ -1001,7 +988,7 @@ reboot -f >/dev/null 2>&1
    */
   private static async checkWindowsRDP(ip: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port: 3389, timeout: 10000 });
+      const socket = createConnection({ host: ip, port: 22, timeout: 10000 });
       
       socket.on('connect', () => {
         socket.destroy();

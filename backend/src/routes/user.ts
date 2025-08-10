@@ -411,6 +411,7 @@ router.post('/install',
     if (!ipRegex.test(validatedData.ip)) {
       throw new BadRequestError('Invalid IP address format');
     }
+
     // Check user quota first
     const hasQuota = await UserService.checkQuotaForInstallation(req.user.id);
     if (!hasQuota) {
@@ -418,23 +419,6 @@ router.post('/install',
         success: false,
         message: 'Insufficient quota',
         error: 'Your quota is insufficient for Windows installation. Please top up your quota to proceed.'
-      });
-      return;
-    }
-
-    // Check if user has reached install limit (for free users)
-    const userInstalls = await db.get(
-      'SELECT COUNT(*) as count FROM install_data WHERE user_id = ?',
-      [req.user.id]
-    );
-
-    // For now, allow unlimited installs for admin users, limit to 3 for regular users
-    const user = await db.get('SELECT admin FROM users WHERE id = ?', [req.user.id]);
-    if (user.admin !== 1 && userInstalls.count >= 3) {
-      res.status(400).json({
-        success: false,
-        message: 'Install limit reached',
-        error: 'Free users are limited to 3 installations. Please upgrade your plan.'
       });
       return;
     }
@@ -455,6 +439,7 @@ router.post('/install',
       ip: validatedData.ip,
       win_ver: validatedData.win_ver
     });
+    
     // Create new install request
     const result = await db.run(`
       INSERT INTO install_data (user_id, ip, passwd_vps, win_ver, passwd_rdp, status, created_at, updated_at)
