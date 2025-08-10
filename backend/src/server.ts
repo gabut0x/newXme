@@ -12,6 +12,22 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 // Set timezone to Asia/Jakarta globally
 process.env.TZ = 'Asia/Jakarta';
 
+// Simple logger implementation (replace with proper logger later)
+const logger = {
+  info: (message: string, ...args: any[]) => {
+    const timestamp = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    console.log(`[${timestamp}] [INFO]:`, message, ...args);
+  },
+  warn: (message: string, ...args: any[]) => {
+    const timestamp = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    console.warn(`[${timestamp}] [WARN]:`, message, ...args);
+  },
+  error: (message: string, ...args: any[]) => {
+    const timestamp = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    console.error(`[${timestamp}] [ERROR]:`, message, ...args);
+  }
+};
+
 // Log timezone info for debugging
 logger.info('Timezone Configuration:', {
   processEnvTZ: process.env.TZ,
