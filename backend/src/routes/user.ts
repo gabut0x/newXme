@@ -21,10 +21,70 @@ import { DatabaseSecurity } from '../utils/dbSecurity.js';
 
 import { NotificationService } from '../services/notificationService.js';
 import { InstallService } from '../services/installService.js';
+
 const router = express.Router();
 
 // Apply security middleware to all routes
 router.use(sqlInjectionProtection);
+
+// Real-time notifications endpoint (Server-Sent Events)
+router.get('/notifications/stream',
+  authenticateToken,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    // Set headers for Server-Sent Events
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Cache-Control'
+    });
+
+    // Send initial connection message
+    res.write(`data: ${JSON.stringify({
+      type: 'connection',
+      message: 'Connected to notification stream',
+      timestamp: DateUtils.nowISO()
+    })}\n\n`);
+
+    // Register user for notifications
+    const unregister = NotificationService.registerUser(req.user.id, (notification) => {
+      res.write(`data: ${JSON.stringify(notification)}\n\n`);
+    });
+
+    // Handle client disconnect
+    req.on('close', () => {
+      unregister();
+      logger.info('User disconnected from notification stream:', { userId: req.user?.id });
+    });
+
+    req.on('error', (error) => {
+      logger.error('Notification stream error:', { userId: req.user?.id, error });
+      unregister();
+    });
+
+    // Keep connection alive with periodic heartbeat
+    const heartbeat = setInterval(() => {
+      res.write(`data: ${JSON.stringify({
+        type: 'heartbeat',
+        timestamp: DateUtils.nowISO()
+      })}\n\n`);
+    }, 30000); // Every 30 seconds
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+    });
+  })
+);
+
 // Get user profile
 router.get('/profile',
   authenticateToken,

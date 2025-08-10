@@ -377,6 +377,28 @@ class ApiService {
     return this.api.get('/user/payment-methods/enabled');
   }
 
+  // Real-time notifications
+  createNotificationStream(userId: number, onNotification: (notification: any) => void): EventSource {
+    const eventSource = new EventSource(`${this.api.defaults.baseURL}/user/notifications/stream`, {
+      withCredentials: true
+    });
+
+    eventSource.onmessage = (event) => {
+      try {
+        const notification = JSON.parse(event.data);
+        onNotification(notification);
+      } catch (error) {
+        console.error('Failed to parse notification:', error);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('Notification stream error:', error);
+    };
+
+    return eventSource;
+  }
+
   // Admin endpoints
   async getAdminWindowsVersions(): Promise<AxiosResponse<ApiResponse<WindowsVersion[]>>> {
     return this.api.get('/admin/windows-versions');

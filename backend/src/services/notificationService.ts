@@ -1,7 +1,6 @@
 import { getDatabase } from '../database/init.js';
 import { logger } from '../utils/logger.js';
 import { DateUtils } from '../utils/dateUtils.js';
-import { emailService } from './emailService.js';
 
 export interface NotificationData {
   userId: number;
@@ -11,7 +10,98 @@ export interface NotificationData {
   data?: any;
 }
 
+export interface InstallStatusUpdate {
+  installId: number;
+  userId: number;
+  status: string;
+  message: string;
+  timestamp: string;
+  ip?: string;
+  winVersion?: string;
+}
+
+// In-memory storage for real-time notifications (in production, use Redis or WebSocket)
+const activeConnections = new Map<number, any[]>(); // userId -> array of notification callbacks
+
 export class NotificationService {
+  /**
+   * Register user for real-time notifications (dashboard connection)
+   */
+  static registerUser(userId: number, callback: (notification: any) => void): () => void {
+    if (!activeConnections.has(userId)) {
+      activeConnections.set(userId, []);
+    }
+    
+    const userCallbacks = activeConnections.get(userId)!;
+    userCallbacks.push(callback);
+    
+    logger.info('User registered for real-time notifications:', { userId });
+    
+    // Return unregister function
+    return () => {
+      const callbacks = activeConnections.get(userId);
+      if (callbacks) {
+        const index = callbacks.indexOf(callback);
+        if (index > -1) {
+          callbacks.splice(index, 1);
+        }
+        if (callbacks.length === 0) {
+          activeConnections.delete(userId);
+        }
+      }
+      logger.info('User unregistered from real-time notifications:', { userId });
+    };
+  }
+
+  /**
+   * Send real-time notification to user dashboard
+   */
+  static sendRealTimeNotification(userId: number, notification: any): void {
+    const userCallbacks = activeConnections.get(userId);
+    if (userCallbacks && userCallbacks.length > 0) {
+      userCallbacks.forEach(callback => {
+        try {
+          callback(notification);
+        } catch (error) {
+          logger.error('Error sending real-time notification:', error);
+        }
+      });
+      
+      logger.info('Real-time notification sent to user:', {
+        userId,
+        notificationType: notification.type,
+        activeConnections: userCallbacks.length
+      });
+    } else {
+      logger.info('No active connections for user:', { userId });
+    }
+  }
+
+  /**
+   * Notify installation status update (real-time to dashboard)
+   */
+  static async notifyInstallStatusUpdate(update: InstallStatusUpdate): Promise<void> {
+    const notification = {
+      type: 'install_status_update',
+      installId: update.installId,
+      status: update.status,
+      message: update.message,
+      timestamp: update.timestamp,
+      ip: update.ip,
+      winVersion: update.winVersion
+    };
+
+    // Send real-time notification to dashboard
+    this.sendRealTimeNotification(update.userId, notification);
+
+    logger.info('Install status update notification sent:', {
+      userId: update.userId,
+      installId: update.installId,
+      status: update.status,
+      message: update.message
+    });
+  }
+
   /**
    * Send notification to user
    */
@@ -40,20 +130,21 @@ export class NotificationService {
         return;
       }
 
-      // Send email notification based on type
-      switch (notification.type) {
-        case 'install_completed':
-          await this.sendInstallCompletedEmail(user.email, user.username, notification.data);
-          break;
-        case 'install_failed':
-          await this.sendInstallFailedEmail(user.email, user.username, notification.data);
-          break;
-        case 'quota_added':
-          await this.sendQuotaAddedEmail(user.email, user.username, notification.data);
-          break;
-        default:
-          await this.sendGenericNotificationEmail(user.email, user.username, notification);
-          break;
+      // Only send email for important notifications (quota_added)
+      if (notification.type === 'quota_added') {
+        await this.sendQuotaAddedEmail(user.email, user.username, notification.data);
+      }
+      
+      // For install status updates, only send real-time notifications to dashboard
+      if (notification.type === 'install_completed' || notification.type === 'install_failed') {
+        // Send real-time notification instead of email
+        this.sendRealTimeNotification(notification.userId, {
+          type: notification.type,
+          title: notification.title,
+          message: notification.message,
+          data: notification.data,
+          timestamp: DateUtils.nowISO()
+        });
       }
 
     } catch (error: any) {
@@ -421,20 +512,21 @@ The XME Projects Team
   static async notifyInstallationCompleted(
     userId: number,
     installData: {
+      installId: number;
       ip: string;
       winVersion: string;
       rdpPassword: string;
     }
   ): Promise<void> {
-    await this.sendNotification({
+    // Send real-time notification to dashboard
+    await this.notifyInstallStatusUpdate({
+      installId: installData.installId,
       userId,
-      type: 'install_completed',
-      title: 'Windows Installation Completed',
-      message: `Your Windows installation on ${installData.ip} has been completed successfully.`,
-      data: {
-        ...installData,
-        completedAt: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
-      }
+      status: 'completed',
+      message: `Windows installation completed successfully on ${installData.ip}`,
+      timestamp: DateUtils.nowISO(),
+      ip: installData.ip,
+      winVersion: installData.winVersion
     });
   }
 
@@ -444,20 +536,21 @@ The XME Projects Team
   static async notifyInstallationFailed(
     userId: number,
     installData: {
+      installId: number;
       ip: string;
       winVersion: string;
       error: string;
     }
   ): Promise<void> {
-    await this.sendNotification({
+    // Send real-time notification to dashboard
+    await this.notifyInstallStatusUpdate({
+      installId: installData.installId,
       userId,
-      type: 'install_failed',
-      title: 'Windows Installation Failed',
-      message: `Your Windows installation on ${installData.ip} has failed: ${installData.error}`,
-      data: {
-        ...installData,
-        failedAt: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
-      }
+      status: 'failed',
+      message: `Installation failed on ${installData.ip}: ${installData.error}`,
+      timestamp: DateUtils.nowISO(),
+      ip: installData.ip,
+      winVersion: installData.winVersion
     });
   }
 

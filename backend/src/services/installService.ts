@@ -6,7 +6,6 @@ import { GeoIPService } from './geoipService.js';
 import { Client } from 'ssh2';
 import { createConnection } from 'net';
 import crypto from 'crypto';
-import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -583,51 +582,23 @@ export class InstallService {
   }
 
   /**
-   * Obfuscate script using bash-obfuscate
+   * Obfuscate script using simple base64 + gzip compression
    */
   private static async obfuscateScript(script: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const child = spawn('npx', ['bash-obfuscate'], {
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-
-      let output = '';
-      let errorOutput = '';
-
-      child.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-
-      child.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-      });
-
-      child.on('close', (code) => {
-        if (code === 0) {
-          resolve(output);
-        } else {
-          logger.error('Script obfuscation failed:', { code, errorOutput });
-          // Fallback to basic obfuscation
-          const compressed = zlib.gzipSync(Buffer.from(script));
-          const encoded = compressed.toString('base64');
-          const fallbackObfuscated = `#!/bin/bash\necho "${encoded}" | base64 -d | gzip -d | bash`;
-          resolve(fallbackObfuscated);
-        }
-      });
-
-      child.on('error', (error) => {
-        logger.error('Script obfuscation process error:', error);
-        // Fallback to basic obfuscation
-        const compressed = zlib.gzipSync(Buffer.from(script));
-        const encoded = compressed.toString('base64');
-        const fallbackObfuscated = `#!/bin/bash\necho "${encoded}" | base64 -d | gzip -d | bash`;
-        resolve(fallbackObfuscated);
-      });
-
-      // Send script to stdin
-      child.stdin.write(script);
-      child.stdin.end();
-    });
+    try {
+      // Simple but effective obfuscation using gzip + base64
+      const compressed = zlib.gzipSync(Buffer.from(script));
+      const encoded = compressed.toString('base64');
+      
+      // Create obfuscated script that decodes and executes
+      const obfuscatedScript = `#!/bin/bash\necho "${encoded}" | base64 -d | gzip -d | bash`;
+      
+      logger.info('Script obfuscated successfully using gzip+base64');
+      return obfuscatedScript;
+    } catch (error: any) {
+      logger.error('Script obfuscation failed:', error);
+      throw new Error('Failed to obfuscate installation script');
+    }
   }
 
   /**
@@ -740,6 +711,8 @@ export class InstallService {
           // Send failure notification
           const { NotificationService } = await import('./notificationService.js');
           await NotificationService.notifyInstallationFailed(userId, {
+            installId,
+            installId,
             ip,
             winVersion: install.win_ver,
             error: 'Installation failed to start within expected time. Please check your VPS configuration.'
@@ -846,10 +819,18 @@ export class InstallService {
   static async updateInstallStatus(
     installId: number,
     status: string,
-    message?: string
+    message?: string,
+    notifyUser: boolean = true
   ): Promise<void> {
     try {
       const db = getDatabase();
+      
+      // Get install data with user info for notifications
+      const install = await db.get(
+        'SELECT user_id, ip, win_ver FROM install_data WHERE id = ?',
+        [installId]
+      );
+      
       await db.run(
         'UPDATE install_data SET status = ?, updated_at = ? WHERE id = ?',
         [status, DateUtils.nowSQLite(), installId]
@@ -867,6 +848,20 @@ export class InstallService {
         status,
         message
       });
+
+      // Send real-time notification to user dashboard
+      if (notifyUser && install) {
+        const { NotificationService } = await import('./notificationService.js');
+        await NotificationService.notifyInstallStatusUpdate({
+          installId,
+          userId: install.user_id,
+          status,
+          message: message || `Installation status updated to ${status}`,
+          timestamp: DateUtils.nowISO(),
+          ip: install.ip,
+          winVersion: install.win_ver
+        });
+      }
     } catch (error: any) {
       logger.error('Failed to update install status:', {
         installId,
@@ -989,6 +984,7 @@ wget -O /tmp/install.gz "$tmpTARGET" && {
     cd /tmp
     gzip -d install.gz
     chmod +x install
+    report_progress "install_start" "running" "Starting Windows installation process"
     ./install
     report_progress "install_complete" "completed" "Installation completed, rebooting to Windows"
 } || {
@@ -997,6 +993,7 @@ wget -O /tmp/install.gz "$tmpTARGET" && {
 }
 
 # Reboot to Windows
+report_progress "rebooting" "running" "Rebooting to Windows"
 reboot -f >/dev/null 2>&1
 `;
   }

@@ -1,12 +1,24 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode } from 'react';
 import { apiService, User } from '../services/api';
 
+// Notification interface
+export interface DashboardNotification {
+  type: string;
+  installId?: number;
+  status?: string;
+  message: string;
+  timestamp: string;
+  ip?: string;
+  winVersion?: string;
+}
+
 // Auth state interface
 interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  notifications: DashboardNotification[];
 }
 
 // Auth actions
@@ -16,11 +28,14 @@ type AuthAction =
   | { type: 'AUTH_FAILURE'; payload: string }
   | { type: 'AUTH_LOGOUT' }
   | { type: 'UPDATE_USER'; payload: User }
-  | { type: 'CLEAR_ERROR' };
+  | { type: 'CLEAR_ERROR' }
+  | { type: 'ADD_NOTIFICATION'; payload: DashboardNotification }
+  | { type: 'CLEAR_NOTIFICATIONS' };
 
 // Auth context interface
 interface AuthContextType {
   state: AuthState;
+  notifications: DashboardNotification[];
   login: (username: string, password: string, recaptchaToken: string) => Promise<void>;
   register: (username: string, email: string, password: string, confirmPassword: string, recaptchaToken: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -31,6 +46,8 @@ interface AuthContextType {
   updateProfile: (data: any) => Promise<void>;
   clearError: () => void;
   checkAuth: () => Promise<void>;
+  addNotification: (notification: DashboardNotification) => void;
+  clearNotifications: () => void;
 }
 
 // Initial state
@@ -39,6 +56,7 @@ const initialState: AuthState = {
   isAuthenticated: false,
   isLoading: true,
   error: null,
+  notifications: [],
 };
 
 // Auth reducer
@@ -84,6 +102,16 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         ...state,
         error: null,
       };
+    case 'ADD_NOTIFICATION':
+      return {
+        ...state,
+        notifications: [action.payload, ...state.notifications.slice(0, 9)], // Keep last 10 notifications
+      };
+    case 'CLEAR_NOTIFICATIONS':
+      return {
+        ...state,
+        notifications: [],
+      };
     default:
       return state;
   }
@@ -99,6 +127,7 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [state, dispatch] = useReducer(authReducer, initialState);
+  const [notificationStream, setNotificationStream] = React.useState<EventSource | null>(null);
 
   // Check authentication status on app load
   const checkAuth = useCallback(async () => {
@@ -245,6 +274,38 @@ export function AuthProvider({ children }: AuthProviderProps) {
     dispatch({ type: 'CLEAR_ERROR' });
   }, []);
 
+  // Add notification function
+  const addNotification = useCallback((notification: DashboardNotification) => {
+    dispatch({ type: 'ADD_NOTIFICATION', payload: notification });
+  }, []);
+
+  // Clear notifications function
+  const clearNotifications = useCallback(() => {
+    dispatch({ type: 'CLEAR_NOTIFICATIONS' });
+  }, []);
+
+  // Setup real-time notifications when user is authenticated
+  useEffect(() => {
+    if (state.isAuthenticated && state.user && !notificationStream) {
+      const stream = apiService.createNotificationStream(state.user.id, (notification) => {
+        if (notification.type !== 'heartbeat' && notification.type !== 'connection') {
+          addNotification(notification);
+        }
+      });
+      
+      setNotificationStream(stream);
+    } else if (!state.isAuthenticated && notificationStream) {
+      notificationStream.close();
+      setNotificationStream(null);
+    }
+
+    return () => {
+      if (notificationStream) {
+        notificationStream.close();
+      }
+    };
+  }, [state.isAuthenticated, state.user, addNotification]);
+
   // Check auth on mount
   useEffect(() => {
     checkAuth();
@@ -252,6 +313,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const value: AuthContextType = {
     state,
+    notifications: state.notifications,
     login,
     register,
     logout,
@@ -262,6 +324,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     updateProfile,
     clearError,
     checkAuth,
+    addNotification,
+    clearNotifications,
   };
 
   return (

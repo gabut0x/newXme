@@ -6,10 +6,12 @@ import { DateUtils } from './dateUtils.js';
 export class Logger {
   private logDir: string;
   private logFile: string;
+  private isDevelopment: boolean;
 
   constructor() {
     this.logDir = path.join(process.cwd(), 'logs');
     this.logFile = path.join(this.logDir, 'app.log');
+    this.isDevelopment = process.env.NODE_ENV === 'development';
     this.ensureLogDirectory();
   }
 
@@ -45,8 +47,8 @@ export class Logger {
       console.log(formattedMessage.trim());
     }
 
-    // Write to file in production
-    if (process.env.NODE_ENV === 'production') {
+    // Write to file in development for debugging, and always in production
+    if (this.isDevelopment || process.env.NODE_ENV === 'production') {
       this.writeToFile(formattedMessage);
     }
   }

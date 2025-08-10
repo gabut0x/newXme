@@ -70,6 +70,7 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import TopupModal from '@/components/TopupModal';
+import { useNotifications } from '@/hooks/useNotifications';
 
 interface PaymentModalData {
   reference: string;
@@ -92,6 +93,7 @@ export default function UserDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingTopup, setIsLoadingTopup] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { notifications, isConnected } = useNotifications();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'install' | 'install-history' | 'topup-history'>('dashboard');
   const [showTopupModal, setShowTopupModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
