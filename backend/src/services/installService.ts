@@ -766,7 +766,7 @@ export class InstallService {
         const install = await this.getInstallById(installId);
         
         if (install && install.status === 'running') {
-          // Check if Windows is accessible via RDP (port 3389)
+          // Check if Windows is accessible via RDP (port 22)
           const isWindowsReady = await this.checkWindowsRDP(ip);
           
           if (isWindowsReady) {
@@ -820,7 +820,7 @@ export class InstallService {
    */
   private static async checkWindowsRDP(ip: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port: 3389, timeout: 10000 });
+      const socket = createConnection({ host: ip, port: 22, timeout: 10000 });
       
       socket.on('connect', () => {
         socket.destroy();

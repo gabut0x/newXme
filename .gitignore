@@ -8,6 +8,11 @@ build/
 */dist/
 */build/
 
+*/GeoLite2-ASN.mmdb
+*/GeoLite2-Country.mmdb
+GeoLite2-ASN.mmdb
+GeoLite2-Country.mmdb
+
 # Environment variables
 .env
 .env.local
