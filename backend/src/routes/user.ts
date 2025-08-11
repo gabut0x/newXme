@@ -37,11 +37,7 @@ router.get('/notifications/stream',
     const token = tokenFromHeader || tokenFromQuery;
     
     if (!token) {
-      console.log('No token provided for notification stream:', {
-        authHeader: !!authHeader,
-        tokenFromQuery: !!tokenFromQuery,
-        headers: req.headers
-      });
+      logger.warn('No token provided for notification stream');
       res.status(401).json({
         success: false,
         message: 'Access token required',
@@ -59,7 +55,7 @@ router.get('/notifications/stream',
       // Check if token is blacklisted
       const isBlacklisted = await AuthUtils.isTokenBlacklisted(token);
       if (isBlacklisted) {
-        console.log('Token is blacklisted for notification stream');
+        logger.warn('Token is blacklisted for notification stream');
         res.status(401).json({
           success: false,
           message: 'Token has been revoked',
@@ -74,7 +70,7 @@ router.get('/notifications/stream',
       // Get user from database
       const userData = await UserService.getUserById(decoded.userId);
       if (!userData || !userData.is_active) {
-        console.log('User not found or inactive for notification stream');
+        logger.warn('User not found or inactive for notification stream');
         res.status(401).json({
           success: false,
           message: 'User not found or inactive',
@@ -84,7 +80,7 @@ router.get('/notifications/stream',
       }
       
       if (!userData.is_verified) {
-        console.log('User not verified for notification stream');
+        logger.warn('User not verified for notification stream');
         res.status(403).json({
           success: false,
           message: 'Email verification required',
@@ -101,7 +97,7 @@ router.get('/notifications/stream',
         admin: userData.admin
       };
       
-      console.log('User authenticated for notification stream:', { userId: user.id, username: user.username });
+      logger.info('User authenticated for notification stream:', { userId: user.id, username: user.username });
     } catch (error: any) {
       logger.error('Notification stream authentication error:', error);
       res.status(401).json({
@@ -131,7 +127,12 @@ router.get('/notifications/stream',
 
     // Register user for notifications
     const unregister = NotificationService.registerUser(user.id, (notification) => {
+      try {
       res.write(`data: ${JSON.stringify(notification)}\n\n`);
+      } catch (error) {
+        logger.error('Error writing notification to stream:', error);
+        unregister();
+      }
     });
 
     // Handle client disconnect
@@ -147,10 +148,16 @@ router.get('/notifications/stream',
 
     // Keep connection alive with periodic heartbeat
     const heartbeat = setInterval(() => {
-      res.write(`data: ${JSON.stringify({
-        type: 'heartbeat',
-        timestamp: DateUtils.nowISO()
-      })}\n\n`);
+      try {
+        res.write(`data: ${JSON.stringify({
+          type: 'heartbeat',
+          timestamp: DateUtils.nowISO()
+        })}\n\n`);
+      } catch (error) {
+        logger.error('Error sending heartbeat:', error);
+        clearInterval(heartbeat);
+        unregister();
+      }
     }, 30000); // Every 30 seconds
 
     req.on('close', () => {

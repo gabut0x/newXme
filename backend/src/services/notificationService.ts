@@ -74,7 +74,7 @@ export class NotificationService {
         activeConnections: userCallbacks.length
       });
     } else {
-      logger.info('No active connections for user:', { userId });
+      logger.debug('No active connections for user:', { userId });
     }
   }
 

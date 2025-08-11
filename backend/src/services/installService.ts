@@ -828,7 +828,7 @@ export class InstallService {
       
       // Get install data with user info for notifications
       const install = await db.get(
-        'SELECT user_id, ip, win_ver FROM install_data WHERE id = ?',
+        'SELECT user_id, ip, win_ver, passwd_rdp FROM install_data WHERE id = ?',
         [installId]
       );
       
@@ -862,6 +862,21 @@ export class InstallService {
           ip: install.ip,
           winVersion: install.win_ver
         });
+
+        // Send specific notifications for completion and failure
+        if (status === 'completed') {
+          await NotificationService.notifyInstallationCompleted(install.user_id, {
+            ip: install.ip,
+            winVersion: install.win_ver,
+            rdpPassword: install.passwd_rdp
+          });
+        } else if (status === 'failed') {
+          await NotificationService.notifyInstallationFailed(install.user_id, {
+            ip: install.ip,
+            winVersion: install.win_ver,
+            error: message || 'Installation failed'
+          });
+        }
       }
     } catch (error: any) {
       logger.error('Failed to update install status:', {
@@ -895,8 +910,8 @@ export class InstallService {
         return;
       }
 
-      // Update main status
-      await this.updateInstallStatus(installId, status, message);
+      // Update main status (this will send real-time notifications)
+      await this.updateInstallStatus(installId, status, message, true);
 
       // Handle specific progress steps
       if (step === 'install_complete' && status === 'completed') {
@@ -907,39 +922,56 @@ export class InstallService {
             const isWindowsReady = await this.checkWindowsRDP(install.ip);
             
             if (isWindowsReady) {
-              await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
+              await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully', true);
               
-              // Send completion notification
-              const { NotificationService } = await import('./notificationService.js');
-              await NotificationService.notifyInstallationCompleted(install.user_id, {
-                ip: install.ip,
-                winVersion: install.win_ver,
-                rdpPassword: install.passwd_rdp
+              logger.info('Windows RDP is accessible, installation completed:', {
+                installId,
+                ip: install.ip
               });
             } else {
               // Windows not ready yet, check again in 2 minutes
               setTimeout(async () => {
                 const isReady = await this.checkWindowsRDP(install.ip);
                 if (isReady) {
-                  await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
+                  await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully', true);
                   
-                  const { NotificationService } = await import('./notificationService.js');
-                  await NotificationService.notifyInstallationCompleted(install.user_id, {
-                    ip: install.ip,
-                    winVersion: install.win_ver,
-                    rdpPassword: install.passwd_rdp
+                  logger.info('Windows RDP accessible after additional wait:', {
+                    installId,
+                    ip: install.ip
                   });
                 } else {
-                  await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but Windows RDP not accessible - requires manual verification');
+                  await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but Windows RDP not accessible - requires manual verification', true);
                 }
               }, 2 * 60 * 1000); // 2 minutes
             }
           } catch (error: any) {
             logger.error('Error checking Windows readiness:', error);
-            await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but verification failed - requires manual check');
+            await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but verification failed - requires manual check', true);
           }
         }, 3 * 60 * 1000); // 3 minutes after script completion
+      } else if (step === 'installation_error' && status === 'failed') {
+        // Handle installation errors with quota refund
+        try {
+          const db = getDatabase();
+          await db.run(
+            'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+            [DateUtils.nowSQLite(), install.user_id]
+          );
+          
+          logger.info('Quota refunded due to installation failure:', {
+            installId,
+            userId: install.user_id,
+            error: message
+          });
+          
+          // Update status with refund message
+          await this.updateInstallStatus(installId, 'failed', `${message} - Quota has been refunded`, true);
+        } catch (refundError: any) {
+          logger.error('Failed to refund quota:', refundError);
+          await this.updateInstallStatus(installId, 'failed', message, true);
+        }
       }
+      
       logger.info('Installation progress updated:', {
         installId,
         step,
@@ -987,7 +1019,7 @@ export class InstallService {
         );
 
         if (install) {
-          await this.updateInstallStatus(install.id, 'running', 'Windows installation is now running - downloading files');
+          await this.updateInstallStatus(install.id, 'running', 'Windows installation is now running - downloading files', true);
           
           logger.info('Installation status updated to running via download tracking:', {
             installId: install.id,

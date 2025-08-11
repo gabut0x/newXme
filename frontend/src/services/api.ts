@@ -396,20 +396,18 @@ class ApiService {
     eventSource.onmessage = (event) => {
       try {
         const notification = JSON.parse(event.data);
+        console.log('Received notification:', notification);
         onNotification(notification);
       } catch (error) {
         console.error('Failed to parse notification:', error);
       }
     };
 
+    eventSource.onopen = () => {
+      console.log('Notification stream connected');
+    };
     eventSource.onerror = (error) => {
       console.error('Notification stream error:', error);
-      
-      // Attempt to reconnect after 5 seconds
-      setTimeout(() => {
-        console.log('Attempting to reconnect notification stream...');
-        eventSource.close();
-      }, 5000);
     };
 
     return eventSource;
