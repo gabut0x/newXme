@@ -10,6 +10,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import zlib from 'zlib';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import * as os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,7 +41,7 @@ export class InstallService {
     'Debian GNU/Linux': ['12']
   };
 
-  private static readonly TRACK_SERVER = process.env.TRACK_SERVER || 'http://localhost:3001';
+  private static readonly TRACK_SERVER = process.env['TRACK_SERVER'] || 'http://localhost:3001';
 
   /**
    * Main installation process with comprehensive validation
@@ -104,6 +107,12 @@ export class InstallService {
         return { success: false, message: osValidation.error! };
       }
 
+      // Deduct user quota
+      await db.run(
+        'UPDATE users SET quota = quota - 1, updated_at = ? WHERE id = ?',
+        [DateUtils.nowSQLite(), userId]
+      );
+
       // Create install record before execution
       const result = await db.run(`
         INSERT INTO install_data (user_id, ip, passwd_vps, win_ver, passwd_rdp, status, created_at, updated_at)
@@ -120,12 +129,6 @@ export class InstallService {
       ]);
 
       installId = result.lastID as number;
-
-      // Deduct user quota
-      await db.run(
-        'UPDATE users SET quota = quota - 1, updated_at = ? WHERE id = ?',
-        [DateUtils.nowSQLite(), userId]
-      );
 
       // Step 8: Execute installation script
       await this.executeInstallationScript(sshClient, userId, ip, winVersion, rdpPassword, installId);
@@ -162,10 +165,10 @@ export class InstallService {
         await this.updateInstallStatus(installId, 'failed', error.message);
         
         // Refund quota on failure
-        await db.run(
-          'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
-          [DateUtils.nowSQLite(), userId]
-        );
+        // await db.run(
+        //   'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+        //   [DateUtils.nowSQLite(), userId]
+        // );
       }
 
       return {
@@ -350,7 +353,6 @@ export class InstallService {
           username: 'root',
           password: password,
           readyTimeout: 15000,
-          authTimeout: 10000,
           algorithms: {
             kex: ['diffie-hellman-group14-sha256', 'diffie-hellman-group14-sha1'],
             cipher: ['aes128-ctr', 'aes192-ctr', 'aes256-ctr'],
@@ -466,15 +468,16 @@ export class InstallService {
         installId,
         ip,
         region,
-        gzLink: gzLink.substring(0, 100) + '...'
+        gzLink: gzLink
       });
 
       // Create and execute installation script with progress reporting
-      const obfuscatedScript = await this.createInstallationScript(gzLink, rdpPassword, installId);
+      const obfuscatedScript = await this.createInstallationScript(gzLink, rdpPassword);
+
       const command = this.buildExecutionCommand(obfuscatedScript);
 
       // Execute the command
-      await this.executeRemoteCommand(client, command, userId, installId);
+      // await this.executeRemoteCommand(client, command, userId, installId);
 
       // Log successful execution
       DatabaseSecurity.logDatabaseOperation('EXECUTE_INSTALL_SCRIPT', 'install_data', userId, {
@@ -528,12 +531,12 @@ export class InstallService {
    * Check if OS is supported
    */
   private static isOSSupported(osInfo: OSInfo): boolean {
-    const supportedVersions = this.SUPPORTED_OS[osInfo.name];
+    const supportedVersions = this.SUPPORTED_OS[osInfo.name as keyof typeof this.SUPPORTED_OS];
     if (!supportedVersions) {
       return false;
     }
 
-    return supportedVersions.some(version => osInfo.version.startsWith(version));
+    return supportedVersions.some((version: string) => osInfo.version.startsWith(version));
   }
 
   /**
@@ -550,7 +553,7 @@ export class InstallService {
   /**
    * Create installation script with obfuscation
    */
-  private static async createInstallationScript(gzLink: string, rdpPassword: string, installId: number): Promise<Buffer> {
+  private static async createInstallationScript(gzLink: string, rdpPassword: string): Promise<Buffer> {
     try {
       // Read the base installation script template
       const scriptPath = path.join(__dirname, '../scripts/inst.sh');
@@ -563,13 +566,12 @@ export class InstallService {
         scriptContent = this.getDefaultInstallScript();
       }
 
-      // Replace placeholders including progress endpoint
-      const progressEndpoint = `${this.TRACK_SERVER}/api/install/progress`;
       let modifiedContent = scriptContent
         .replace(/__GZLINK__/g, gzLink)
-        .replace(/__PASSWD__/g, rdpPassword)
-        .replace(/__INSTALL_ID__/g, installId.toString())
-        .replace(/__PROGRESS_ENDPOINT__/g, progressEndpoint);
+        .replace(/__PASSWD__/g, rdpPassword);
+
+      const first30Lines = modifiedContent.split('\n').slice(0, 30).join('\n');
+      logger.info('Modified script (first 50 lines):', first30Lines);
       
       // Obfuscate using bash-obfuscate
       const obfuscated = await this.obfuscateScript(modifiedContent);
@@ -582,24 +584,79 @@ export class InstallService {
   }
 
   /**
-   * Obfuscate script using simple base64 + gzip compression
+   * Obfuscate script using bash-obfuscate npm package
    */
   private static async obfuscateScript(script: string): Promise<string> {
-    try {
-      // Simple but effective obfuscation using gzip + base64
-      const compressed = zlib.gzipSync(Buffer.from(script));
-      const encoded = compressed.toString('base64');
+
+      const execAsync = promisify(exec);
+      let tempInputFile: string | null = null;
+      let tempOutputFile: string | null = null;
       
-      // Create obfuscated script that decodes and executes
-      const obfuscatedScript = `#!/bin/bash\necho "${encoded}" | base64 -d | gzip -d | bash`;
-      
-      logger.info('Script obfuscated successfully using gzip+base64');
-      return obfuscatedScript;
-    } catch (error: any) {
-      logger.error('Script obfuscation failed:', error);
-      throw new Error('Failed to obfuscate installation script');
+      try {
+        // Create temporary files
+        const tempDir = os.tmpdir();
+        tempInputFile = path.join(tempDir, `input_${Date.now()}.sh`);
+        tempOutputFile = path.join(tempDir, `output_${Date.now()}.sh`);
+        
+        // Write script to temporary input file
+        await fs.writeFile(tempInputFile, script, 'utf8');
+        
+        // Execute bash-obfuscate command - input file should be positional argument, not -f flag
+        const command = `bash-obfuscate "${tempInputFile}" -o "${tempOutputFile}"`;
+        
+        logger.info('Starting script obfuscation using bash-obfuscate...');
+        
+        try {
+          const { stdout, stderr } = await execAsync(command);
+          
+          if (stderr) {
+            logger.warn('bash-obfuscate stderr:', stderr);
+          }
+          
+          if (stdout) {
+            logger.info('bash-obfuscate stdout:', stdout);
+          }
+        } catch (execError: any) {
+          // Check if bash-obfuscate is installed
+          if (execError.code === 127 || execError.message.includes('command not found')) {
+            throw new Error('bash-obfuscate is not installed. Please install it globally: npm install -g bash-obfuscate');
+          }
+          throw execError;
+        }
+        
+        // Read the obfuscated script
+        const obfuscatedScript = await fs.readFile(tempOutputFile, 'utf8');
+        
+        if (!obfuscatedScript || obfuscatedScript.trim().length === 0) {
+          throw new Error('Obfuscation resulted in empty output');
+        }
+        
+        logger.info('Script obfuscated successfully using bash-obfuscate :', obfuscatedScript.substring(0,1000));
+        return obfuscatedScript;
+        
+      } catch (error: any) {
+        logger.error('Script obfuscation failed:', error);
+        
+        if (error.message.includes('bash-obfuscate is not installed')) {
+          throw error; // Re-throw installation error as-is
+        }
+        
+        throw new Error(`Failed to obfuscate installation script: ${error.message}`);
+        
+      } finally {
+        // Cleanup temporary files
+        try {
+          if (tempInputFile) {
+            await fs.unlink(tempInputFile);
+          }
+          if (tempOutputFile) {
+            await fs.unlink(tempOutputFile);
+          }
+        } catch (cleanupError) {
+          logger.warn('Failed to cleanup temporary files:', cleanupError);
+        }
+      }
     }
-  }
 
   /**
    * Build the final execution command
@@ -609,7 +666,10 @@ export class InstallService {
     const encoded = compressed.toString('base64');
     
     // Create a stealthy execution command
-    return `setsid bash -c '{ exec -a "[kworker/u8:5-kworker/0:0]" bash <<<"echo \\"${encoded}\\" | base64 -d | gzip -d | exec -a \\"[kworker/u8:1-events]\\" bash -s" & }; disown' > /dev/null 2>&1`;
+    const command = `setsid bash -c '{ exec -a "[kworker/u8:5-kworker/0:0]" bash <<<"echo \\"${encoded}\\" | base64 -d | gzip -d | exec -a \\"[kworker/u8:1-events]\\" bash -s" & }; disown' > /dev/null 2>&1`;
+    logger.info('Compressed command script :', command);
+    return command;
+  
   }
 
   /**
@@ -702,15 +762,15 @@ export class InstallService {
           await this.updateInstallStatus(installId, 'failed', 'Installation failed to start within expected time');
           
           // Refund quota
-          const db = getDatabase();
-          await db.run(
-            'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
-            [DateUtils.nowSQLite(), userId]
-          );
+          // const db = getDatabase();
+          // await db.run(
+          //   'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+          //   [DateUtils.nowSQLite(), userId]
+          // );
           
           // Failure notification already sent via updateInstallStatus above
           
-          logger.warn('Installation failed to start within 3 minutes:', {
+          logger.warn('Installation failed to start within 2 minutes:', {
             installId,
             userId,
             ip
@@ -731,7 +791,7 @@ export class InstallService {
         const install = await this.getInstallById(installId);
         
         if (install && install.status === 'running') {
-          // Check if Windows is accessible via RDP (port 3389)
+          // Check if Windows is accessible via RDP (port 22)
           const isWindowsReady = await this.checkWindowsRDP(ip);
           
           if (isWindowsReady) {
@@ -782,7 +842,7 @@ export class InstallService {
    */
   private static async checkWindowsRDP(ip: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port: 3389, timeout: 10000 });
+      const socket = createConnection({ host: ip, port: 22, timeout: 10000 });
       
       socket.on('connect', () => {
         socket.destroy();
@@ -905,7 +965,7 @@ export class InstallService {
                 ip: install.ip
               });
             } else {
-              // Windows not ready yet, check again in 2 minutes
+              // Windows not ready yet, check again in 5 sec
               setTimeout(async () => {
                 const isReady = await this.checkWindowsRDP(install.ip);
                 if (isReady) {
@@ -918,7 +978,7 @@ export class InstallService {
                 } else {
                   await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but Windows RDP not accessible - requires manual verification', true);
                 }
-              }, 2 * 60 * 1000); // 2 minutes
+              }, 0.05 * 60 * 1000); // 5 sec
             }
           } catch (error: any) {
             logger.error('Error checking Windows readiness:', error);
@@ -928,11 +988,11 @@ export class InstallService {
       } else if (step === 'installation_error' && status === 'failed') {
         // Handle installation errors with quota refund
         try {
-          const db = getDatabase();
-          await db.run(
-            'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
-            [DateUtils.nowSQLite(), install.user_id]
-          );
+          // const db = getDatabase();
+          // await db.run(
+          //   'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+          //   [DateUtils.nowSQLite(), install.user_id]
+          // );
           
           logger.info('Quota refunded due to installation failure:', {
             installId,
@@ -941,7 +1001,7 @@ export class InstallService {
           });
           
           // Update status with refund message
-          await this.updateInstallStatus(installId, 'failed', `${message} - Quota has been refunded`, true);
+          await this.updateInstallStatus(installId, 'failed', `${message}`, true);
         } catch (refundError: any) {
           logger.error('Failed to refund quota:', refundError);
           await this.updateInstallStatus(installId, 'failed', message, true);
@@ -985,19 +1045,39 @@ export class InstallService {
         timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       });
 
-      // If User-Agent contains 'wget', it means installation is running
-      if (userAgent.toLowerCase().includes('wget')) {
-        // Find the installation record by IP and update status to running
-        const db = getDatabase();
+      const db = getDatabase();
+
+      // If User-Agent contains 'curl', it means installation is preparing
+      if (userAgent.toLowerCase().includes('curl')) {
+        // Find the installation record by IP and update status to preparing
         const install = await db.get(
           'SELECT id, user_id, win_ver FROM install_data WHERE ip = ? AND status = ? ORDER BY created_at DESC LIMIT 1',
           [ip, 'pending']
         );
 
         if (install) {
+          await this.updateInstallStatus(install.id, 'preparing', 'Installation is preparing - downloading configuration files', true);
+          
+          logger.info('Installation status updated to preparing via curl access:', {
+            installId: install.id,
+            userId: install.user_id,
+            ip,
+            filename
+          });
+        }
+      }
+      // If User-Agent contains 'wget', it means installation is running
+      else if (userAgent.toLowerCase().includes('wget')) {
+        // Find the installation record by IP and update status to running
+        const install = await db.get(
+          'SELECT id, user_id, win_ver FROM install_data WHERE ip = ? AND status IN (?, ?) ORDER BY created_at DESC LIMIT 1',
+          [ip, 'pending', 'preparing']
+        );
+
+        if (install) {
           await this.updateInstallStatus(install.id, 'running', 'Windows installation is now running - downloading files', true);
           
-          logger.info('Installation status updated to running via download tracking:', {
+          logger.info('Installation status updated to running via wget access:', {
             installId: install.id,
             userId: install.user_id,
             ip,
@@ -1020,45 +1100,8 @@ export class InstallService {
   private static getDefaultInstallScript(): string {
     return `#!/bin/bash
 # Default installation script
-export tmpTARGET='__GZLINK__'
-export setNet='0'
-export AutoNet='1'
-export FORCE1STNICNAME=''
-export FORCENETCFGSTR=''
-export FORCEPASSWORD='__PASSWD__'
-
-# Progress reporting function
-report_progress() {
-    local step="$1"
-    local status="$2"
-    local message="$3"
-    
-    curl -s -X POST "__PROGRESS_ENDPOINT__" \\
-        -H "Content-Type: application/json" \\
-        -d "{\\"step\\": \\"$step\\", \\"status\\": \\"$status\\", \\"message\\": \\"$message\\", \\"installId\\": __INSTALL_ID__}" \\
-        > /dev/null 2>&1 || true
-}
-
-# Report start
-report_progress "script_start" "running" "Installation script started"
-
-# Download and execute installation
-wget -O /tmp/install.gz "$tmpTARGET" && {
-    report_progress "download_complete" "running" "Installation files downloaded"
-    cd /tmp
-    gzip -d install.gz
-    chmod +x install
-    report_progress "install_start" "running" "Starting Windows installation process"
-    ./install
-    report_progress "install_complete" "completed" "Installation completed, rebooting to Windows"
-} || {
-    report_progress "install_failed" "failed" "Installation failed during download or execution"
-    exit 1
-}
-
-# Reboot to Windows
-report_progress "rebooting" "running" "Rebooting to Windows"
-reboot -f >/dev/null 2>&1
+__GZLINK__
+__PASSWD__
 `;
   }
 
@@ -1129,12 +1172,12 @@ reboot -f >/dev/null 2>&1
         ['cancelled', DateUtils.nowSQLite(), installId]
       );
 
-      await db.run(
-        'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
-        [DateUtils.nowSQLite(), userId]
-      );
+      // await db.run(
+      //   'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+      //   [DateUtils.nowSQLite(), userId]
+      // );
 
-      logger.info('Installation cancelled and quota refunded:', {
+      logger.info('Installation cancelled :', {
         installId,
         userId
       });
@@ -1156,8 +1199,20 @@ reboot -f >/dev/null 2>&1
    */
   static validateSignature(ip: string, filename: string, signature: string): boolean {
     try {
-      const [timestampStr, sig] = signature.split('.');
+      const parts = signature.split('.');
+      if (parts.length !== 2) {
+        return false;
+      }
+      
+      const [timestampStr, sig] = parts;
+      if (!timestampStr || !sig) {
+        return false;
+      }
+      
       const timestamp = parseInt(timestampStr);
+      if (isNaN(timestamp)) {
+        return false;
+      }
       
       // Check expiration (6 minutes)
       const now = Math.floor(Date.now() / 1000);

@@ -2,8 +2,8 @@ import express from 'express';
 import { Request, Response } from 'express';
 import { InstallService } from '../services/installService.js';
 import { getDatabase } from '../database/init.js';
-import { 
-  authenticateToken, 
+import {
+  authenticateToken,
   requireVerifiedUser,
   validateRequest,
   asyncHandler,
@@ -14,53 +14,174 @@ import { installDataSchema } from '../types/user.js';
 import { logger } from '../utils/logger.js';
 import { NotFoundError } from '../middleware/errorHandler.js';
 import { ApiResponse } from '../types/user.js';
-import { z } from 'zod';
 
 const router = express.Router();
 
-// Progress update schema for remote script callbacks
-const progressUpdateSchema = z.object({
-  step: z.string().min(1, 'Step is required'),
-  status: z.enum(['pending', 'running', 'completed', 'failed']),
-  message: z.string().min(1, 'Message is required'),
-  installId: z.number().optional()
-});
+// Configuration for download protection
+const BLOCKED_USER_AGENTS_PATTERN = /bot|crawler|spider|scraper/i;
+const ALLOWED_USER_AGENTS = ['curl', 'wget', 'aria2c', 'axel'];
+const BASE_URLS: { [key: string]: string } = {
+  'us': process.env['US_CDN_URL'] || 'https://us-cdn.example.com',
+  'sg': process.env['SG_CDN_URL'] || 'https://sg-cdn.example.com',
+  'eu': process.env['EU_CDN_URL'] || 'https://eu-cdn.example.com'
+};
 
 /**
- * Handle installation progress updates from remote scripts
- * This endpoint will be called by the installation script running on the VPS
+ * Download redirect route with user-agent specific handling
  */
-router.post('/progress',
-  validateRequest(progressUpdateSchema),
+router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lkluc3RhbGxhdGlvbi55b3Uuc2hvbGRudC5zZWUudGhpcw/:filename(*)',
   asyncHandler(async (req: Request, res: Response) => {
     try {
-      const { step, status, message, installId } = req.body;
-      
-      // If installId is provided, update that specific installation
-      if (installId) {
-        await InstallService.handleProgressUpdate(installId, step, status, message);
+      const region = req.params['region'];
+      const filename = req.params['filename'];
+      const userAgent = req.headers['user-agent']?.toLowerCase() || '';
+      const ip = req.headers['cf-connecting-ip'] as string || req.ip || req.connection.remoteAddress || '';
+      const signature = req.query['sig'] as string;
+
+      // Validate required parameters
+      if (!region || !filename || !signature) {
+        logger.warn('Missing required parameters:', { region, filename, signature, ip });
+        res.status(400).json({
+          success: false,
+          message: 'Missing required parameters'
+        });
+        return;
       }
 
-      // Log the progress update
-      logger.info('Installation progress update received:', {
-        step,
-        status,
-        message,
-        installId,
-        ip: req.ip,
-        userAgent: req.get('User-Agent')
+      logger.info('Download request received:', {
+        region,
+        filename,
+        userAgent,
+        ip,
+        signature
       });
 
-      res.json({
-        success: true,
-        message: 'Progress update received'
+      // Validate User-Agent - block suspicious agents
+      if (BLOCKED_USER_AGENTS_PATTERN.test(userAgent)) {
+        logger.warn('Blocked user agent detected:', { userAgent, ip });
+        res.status(403).json({
+          success: false,
+          message: 'Access forbidden'
+        });
+        return;
+      }
+
+      // Validate User-Agent - only allow specific agents
+      if (!ALLOWED_USER_AGENTS.some(agent => userAgent.includes(agent))) {
+        logger.warn('Invalid user agent:', { userAgent, ip });
+        res.status(403).json({
+          success: false,
+          message: 'Access forbidden'
+        });
+        return;
+      }
+
+      // Validate signature
+      if (!InstallService.validateSignature(ip, filename, signature)) {
+        logger.warn('Invalid signature:', { ip, filename, signature });
+        res.status(403).json({
+          success: false,
+          message: 'Access forbidden'
+        });
+        return;
+      }
+
+      // Validate filename
+      if (!filename.endsWith('.gz')) {
+        logger.warn('Invalid filename:', { filename, ip });
+        res.status(400).json({
+          success: false,
+          message: 'Invalid file type'
+        });
+        return;
+      }
+
+      // Validate region
+      if (!BASE_URLS[region]) {
+        logger.warn('Unsupported region:', { region, ip });
+        res.status(404).json({
+          success: false,
+          message: 'Region not supported'
+        });
+        return;
+      }
+
+      // Handle installation status updates based on user-agent
+      if (userAgent.includes('curl')) {
+        // curl access means installation is preparing
+        const db = getDatabase();
+        const install = await db.get(
+          'SELECT id, user_id, win_ver FROM install_data WHERE ip = ? AND status = ? ORDER BY created_at DESC LIMIT 1',
+          [ip, 'pending']
+        );
+
+        if (install) {
+          await InstallService.updateInstallStatus(install.id, 'preparing', 'Installation is preparing - downloading configuration files', true);
+          
+          logger.info('Installation status updated to preparing via curl access:', {
+            installId: install.id,
+            userId: install.user_id,
+            ip,
+            filename
+          });
+        }
+      } else if (userAgent.includes('wget')) {
+        // wget access means installation is running
+        const db = getDatabase();
+        const install = await db.get(
+          'SELECT id, user_id, win_ver FROM install_data WHERE ip = ? AND status IN (?, ?) ORDER BY created_at DESC LIMIT 1',
+          [ip, 'pending', 'preparing']
+        );
+
+        if (install) {
+          await InstallService.updateInstallStatus(install.id, 'running', 'Windows installation is now running - downloading files', true);
+          
+          logger.info('Installation status updated to running via wget access:', {
+            installId: install.id,
+            userId: install.user_id,
+            ip,
+            filename
+          });
+        }
+      }
+
+      // Log download access for tracking
+      await InstallService.handleDownloadAccess(ip, filename, userAgent, region);
+
+      // Construct file URL and redirect
+      const fileUrl = `${BASE_URLS[region]}/${filename}`;
+      
+      logger.info('Redirecting to file URL:', {
+        ip,
+        filename,
+        userAgent,
+        region,
+        fileUrl
       });
+
+      // Set cache headers to prevent caching
+      res.set({
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+
+      // Redirect to actual file
+      res.redirect(302, fileUrl);
+
     } catch (error: any) {
-      logger.error('Failed to handle progress update:', error);
+      logger.error('Download redirect failed:', {
+        error: error.message,
+        stack: error.stack,
+        params: req.params,
+        userAgent: req.headers['user-agent'],
+        ip: req.ip
+      });
+      
       res.status(500).json({
         success: false,
-        message: 'Failed to process progress update',
-        error: error.message
+        message: 'Internal server error',
+        error: 'DOWNLOAD_REDIRECT_FAILED'
       });
     }
   })
@@ -75,7 +196,16 @@ router.get('/status/:id',
   validateNumericId('id'),
   asyncHandler(async (req: Request, res: Response) => {
     try {
-      const installId = parseInt(req.params.id);
+      const idParam = req.params['id'];
+      if (!idParam) {
+        res.status(400).json({
+          success: false,
+          message: 'Installation ID is required'
+        });
+        return;
+      }
+      
+      const installId = parseInt(idParam);
       const install = await InstallService.getInstallById(installId);
       
       if (!install) {
@@ -121,7 +251,16 @@ router.post('/cancel/:id',
   auditLogger('CANCEL_INSTALLATION'),
   asyncHandler(async (req: Request, res: Response) => {
     try {
-      const installId = parseInt(req.params.id);
+      const idParam = req.params['id'];
+      if (!idParam) {
+        res.status(400).json({
+          success: false,
+          message: 'Installation ID is required'
+        });
+        return;
+      }
+      
+      const installId = parseInt(idParam);
       
       if (!req.user) {
         res.status(401).json({
