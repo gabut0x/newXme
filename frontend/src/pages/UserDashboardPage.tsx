@@ -129,6 +129,7 @@ export default function UserDashboardPage() {
   const [showTransactionDetails, setShowTransactionDetails] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showRdpPassword, setShowRdpPassword] = useState(false);
+  const [showVpsPassword, setShowVpsPassword] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   
@@ -297,6 +298,11 @@ export default function UserDashboardPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const getWindowsVersionName = (slug: string) => {
+    const version = windowsVersions.find(v => v.slug === slug);
+    return version ? version.name : slug;
   };
 
   const getStatusBadge = (status: string) => {
@@ -575,7 +581,7 @@ export default function UserDashboardPage() {
               
               {/* Notifications Dropdown */}
               {showNotifications && (
-                <div className="absolute right-0 top-full mt-2 w-80 bg-background border rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+                <div className="absolute left-1/2 transform -translate-x-1/2 sm:left-auto sm:right-0 sm:transform-none top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1rem)] bg-background border rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
                   <div className="p-4 border-b">
                     <h3 className="font-semibold">Notifications</h3>
                     <p className="text-sm text-muted-foreground">{notifications.length} new notifications</p>
@@ -640,10 +646,6 @@ export default function UserDashboardPage() {
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="cursor-pointer">
-                  <User className="h-4 w-4 mr-2" />
-                  Profile
-                </DropdownMenuItem>
-                <DropdownMenuItem className="cursor-pointer">
                   <Settings className="h-4 w-4 mr-2" />
                   Settings
                 </DropdownMenuItem>
@@ -665,7 +667,7 @@ export default function UserDashboardPage() {
         }`}>
           <div className="flex flex-col h-full">
             {/* Sidebar Header Spacer */}
-            <div className="h-20 border-b flex items-center px-6">
+            <div className="h-16 md:h-20 flex items-center px-6">
             </div>
 
             {/* Sidebar Content */}
@@ -748,10 +750,6 @@ export default function UserDashboardPage() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Button onClick={() => loadData()} variant="outline">
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Refresh Data
-                      </Button>
                       {!user.is_verified && (
                         <Badge variant="destructive">
                           Email not verified
@@ -952,17 +950,35 @@ export default function UserDashboardPage() {
                             {errors.ip && (
                               <p className="text-sm text-destructive">{errors.ip.message}</p>
                             )}
+                            <p className="text-xs text-muted-foreground">
+                              Ubuntu 22 is Recommended
+                            </p>
                           </div>
 
                           <div className="space-y-2">
                             <Label htmlFor="passwd_vps">VPS Root Password *</Label>
-                            <Input
-                              id="passwd_vps"
-                              type="password"
-                              placeholder="Your VPS root password"
-                              {...register('passwd_vps')}
-                              className={errors.passwd_vps ? 'border-destructive' : ''}
-                            />
+                            <div className="relative">
+                              <Input
+                                id="passwd_vps"
+                                type={showVpsPassword ? 'text' : 'password'}
+                                placeholder="Your VPS root password"
+                                {...register('passwd_vps')}
+                                className={errors.passwd_vps ? 'border-destructive pr-10' : 'pr-10'}
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                onClick={() => setShowVpsPassword(!showVpsPassword)}
+                              >
+                                {showVpsPassword ? (
+                                  <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                ) : (
+                                  <Eye className="h-4 w-4 text-muted-foreground" />
+                                )}
+                              </Button>
+                            </div>
                             {errors.passwd_vps && (
                               <p className="text-sm text-destructive">{errors.passwd_vps.message}</p>
                             )}
@@ -1015,19 +1031,9 @@ export default function UserDashboardPage() {
                               <p className="text-sm text-destructive">{errors.passwd_rdp.message}</p>
                             )}
                             <p className="text-xs text-muted-foreground">
-                              Password for Windows Administrator account (cannot start with #)
+                              Cannot start with #
                             </p>
                           </div>
-                        </div>
-
-                        <div className="bg-blue-50 dark:bg-blue-950/20 p-4 rounded-lg">
-                          <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">Installation Requirements</h4>
-                          <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-1">
-                            <li>• VPS must be running Ubuntu 20/22 or Debian 12</li>
-                            <li>• At least 20GB free disk space</li>
-                            <li>• Stable internet connection</li>
-                            <li>• SSH access enabled (port 22)</li>
-                          </ul>
                         </div>
 
                         <Button 
@@ -1085,30 +1091,75 @@ export default function UserDashboardPage() {
                       </div>
                     ) : (
                       <>
-                        <ScrollArea className="h-[440px]">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>IP Address</TableHead>
-                                <TableHead>Windows Version</TableHead>
-                                <TableHead>Status</TableHead>
-                                <TableHead>Created</TableHead>
-                                <TableHead>Updated</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {paginatedInstallHistory.map((install) => (
-                                <TableRow key={install.id}>
-                                  <TableCell className="font-mono">{install.ip}</TableCell>
-                                  <TableCell>{install.win_ver}</TableCell>
-                                  <TableCell>{getStatusBadge(install.status)}</TableCell>
-                                  <TableCell>{formatDate(install.created_at)}</TableCell>
-                                  <TableCell>{formatDate(install.updated_at)}</TableCell>
+                        {/* Desktop Table View */}
+                        <div className="hidden md:block">
+                          <ScrollArea className="h-[440px]">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead className="w-12">#</TableHead>
+                                  <TableHead>IP Address</TableHead>
+                                  <TableHead>Windows Version</TableHead>
+                                  <TableHead>Status</TableHead>
+                                  <TableHead>Created</TableHead>
+                                  <TableHead>Updated</TableHead>
                                 </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {paginatedInstallHistory.map((install, index) => (
+                                  <TableRow key={install.id}>
+                                    <TableCell className="font-medium">
+                                      {(installHistoryPage - 1) * ITEMS_PER_PAGE + index + 1}
+                                    </TableCell>
+                                    <TableCell className="font-mono">{install.ip}</TableCell>
+                                    <TableCell>{getWindowsVersionName(install.win_ver)}</TableCell>
+                                    <TableCell>{getStatusBadge(install.status)}</TableCell>
+                                    <TableCell>{formatDate(install.created_at)}</TableCell>
+                                    <TableCell>{formatDate(install.updated_at)}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </ScrollArea>
+                        </div>
+
+                        {/* Mobile Card View */}
+                        <div className="md:hidden">
+                          <ScrollArea className="h-[440px]">
+                            <div className="space-y-3 pr-4">
+                              {paginatedInstallHistory.map((install, index) => (
+                                <Card key={install.id}>
+                                  <CardContent className="p-4">
+                                    <div className="flex items-start justify-between mb-3">
+                                      <div className="flex items-center gap-2">
+                                        <Badge variant="outline" className="text-xs">
+                                          #{(installHistoryPage - 1) * ITEMS_PER_PAGE + index + 1}
+                                        </Badge>
+                                        <span className="font-mono text-sm font-medium">{install.ip}</span>
+                                      </div>
+                                      {getStatusBadge(install.status)}
+                                    </div>
+                                    
+                                    <div className="space-y-2 text-sm">
+                                      <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Windows:</span>
+                                        <span className="font-medium">{getWindowsVersionName(install.win_ver)}</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Created:</span>
+                                        <span>{formatDate(install.created_at)}</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Updated:</span>
+                                        <span>{formatDate(install.updated_at)}</span>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
                               ))}
-                            </TableBody>
-                          </Table>
-                        </ScrollArea>
+                            </div>
+                          </ScrollArea>
+                        </div>
                         
                         {renderPagination(installHistoryPage, installHistory.length, setInstallHistoryPage)}
                       </>
