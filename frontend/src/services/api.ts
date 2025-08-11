@@ -385,30 +385,67 @@ class ApiService {
       throw new Error('No authentication token available');
     }
     
-    // Create the notification stream URL with proper token handling
-    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+    // Use relative URL to leverage Vite proxy for development
+    // In production, VITE_API_URL should be set to full backend URL
+    const baseURL = import.meta.env.VITE_API_URL || '/api';
     const streamURL = `${baseURL}/user/notifications/stream?token=${encodeURIComponent(token)}`;
     
-    console.log('Creating notification stream:', streamURL);
+    console.log('🚀 Creating notification stream:', streamURL);
     
     const eventSource = new EventSource(streamURL);
+    
+    // Add debugging for all EventSource states
+    console.log('📡 EventSource initial readyState:', eventSource.readyState);
 
     eventSource.onmessage = (event) => {
       try {
+        console.log('🔔 Raw EventSource message received:', {
+          data: event.data,
+          lastEventId: event.lastEventId,
+          type: event.type,
+          origin: event.origin
+        });
+        
         const notification = JSON.parse(event.data);
-        console.log('Received notification:', notification);
+        console.log('📩 Parsed notification:', notification);
+        console.log('🎯 About to call onNotification callback...');
+        
         onNotification(notification);
+        
+        console.log('✅ Notification callback executed successfully');
       } catch (error) {
-        console.error('Failed to parse notification:', error);
+        console.error('❌ Failed to parse notification:', error, 'Raw data:', event.data);
       }
     };
 
-    eventSource.onopen = () => {
-      console.log('Notification stream connected');
+    eventSource.onopen = (event) => {
+      console.log('✅ Notification stream connected successfully', {
+        readyState: eventSource.readyState,
+        url: eventSource.url,
+        event: event
+      });
     };
+    
     eventSource.onerror = (error) => {
-      console.error('Notification stream error:', error);
+      console.error('❌ Notification stream error:', error);
+      console.log('💔 EventSource error details:', {
+        readyState: eventSource.readyState,
+        url: eventSource.url,
+        error: error
+      });
+      
+      // Additional debugging
+      if (eventSource.readyState === EventSource.CLOSED) {
+        console.log('🚫 EventSource connection was closed');
+      } else if (eventSource.readyState === EventSource.CONNECTING) {
+        console.log('🔄 EventSource is still trying to connect');
+      }
     };
+    
+    // Add additional event listener for debugging
+    eventSource.addEventListener('message', (event) => {
+      console.log('👂 Alternative message listener triggered:', event.data);
+    });
 
     return eventSource;
   }

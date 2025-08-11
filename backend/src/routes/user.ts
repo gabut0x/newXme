@@ -128,7 +128,16 @@ router.get('/notifications/stream',
     // Register user for notifications
     const unregister = NotificationService.registerUser(user.id, (notification) => {
       try {
-      res.write(`data: ${JSON.stringify(notification)}\n\n`);
+        // SSE format: event: type\ndata: json\n\n
+        const sseMessage = `data: ${JSON.stringify(notification)}\n\n`;
+        logger.info('Writing SSE message:', {
+          userId: user.id,
+          message: sseMessage.replace(/\n/g, '\\n'),
+          notification: notification
+        });
+        
+        res.write(sseMessage);
+        res.flush(); // Force flush the data
       } catch (error) {
         logger.error('Error writing notification to stream:', error);
         unregister();
@@ -144,6 +153,12 @@ router.get('/notifications/stream',
     req.on('error', (error) => {
       logger.error('Notification stream error:', { userId: user.id, error });
       unregister();
+    });
+
+    // Additional cleanup for response object
+    res.on('close', () => {
+      unregister();
+      logger.info('Response stream closed for user:', { userId: user.id });
     });
 
     // Keep connection alive with periodic heartbeat
@@ -971,6 +986,66 @@ router.get('/payment-methods/enabled',
         error: error.message
       });
     }
+  })
+);
+
+// Test notification endpoint (for development/testing)
+router.post('/test-notification',
+  authenticateToken,
+  requireVerifiedUser,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+
+    // Send a test installation status notification
+    await NotificationService.notifyInstallStatusUpdate({
+      installId: 999,
+      userId: req.user.id,
+      status: 'completed',
+      message: 'Test notification: Windows installation completed successfully',
+      timestamp: DateUtils.nowISO(),
+      ip: '192.168.1.100',
+      winVersion: 'win11-pro'
+    });
+
+    res.json({
+      success: true,
+      message: 'Test notification sent successfully'
+    } as ApiResponse);
+  })
+);
+
+// Test dashboard refresh notification endpoint
+router.post('/test-dashboard-refresh',
+  authenticateToken,
+  requireVerifiedUser,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+
+    const { status = 'completed' } = req.body;
+    
+    logger.info('Test dashboard refresh notification request:', { userId: req.user.id, status });
+    
+    const testNotification = {
+      type: 'install_status_update',
+      status,
+      message: `Installation ${status} - Dashboard should refresh automatically`,
+      timestamp: DateUtils.nowISO(),
+      ip: '192.168.1.100',
+      installId: 999,
+      winVersion: 'Windows 11 Pro'
+    };
+    
+    NotificationService.sendRealTimeNotification(req.user.id, testNotification);
+    
+    res.json({
+      success: true,
+      message: 'Dashboard refresh test notification sent successfully',
+      data: testNotification
+    } as ApiResponse);
   })
 );
 

@@ -127,7 +127,6 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [state, dispatch] = useReducer(authReducer, initialState);
-  const [notificationStream, setNotificationStream] = React.useState<EventSource | null>(null);
 
   // Check authentication status on app load
   const checkAuth = useCallback(async () => {
@@ -284,27 +283,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     dispatch({ type: 'CLEAR_NOTIFICATIONS' });
   }, []);
 
-  // Setup real-time notifications when user is authenticated
-  useEffect(() => {
-    if (state.isAuthenticated && state.user && state.user.is_verified && !notificationStream) {
-      const stream = apiService.createNotificationStream(state.user.id, (notification) => {
-        if (notification.type !== 'heartbeat' && notification.type !== 'connection') {
-          addNotification(notification);
-        }
-      });
-      
-      setNotificationStream(stream);
-    } else if ((!state.isAuthenticated || !state.user?.is_verified) && notificationStream) {
-      notificationStream.close();
-      setNotificationStream(null);
-    }
-
-    return () => {
-      if (notificationStream) {
-        notificationStream.close();
-      }
-    };
-  }, [state.isAuthenticated, state.user?.is_verified, addNotification]);
+  // Notification stream is now handled by useNotifications hook - removed duplicate logic
 
   // Check auth on mount
   useEffect(() => {

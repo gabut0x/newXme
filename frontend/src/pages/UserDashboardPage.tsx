@@ -137,7 +137,7 @@ export default function UserDashboardPage() {
   const [installHistoryPage, setInstallHistoryPage] = useState(1);
   const [topupHistoryPage, setTopupHistoryPage] = useState(1);
 
-  const { state, logout } = useAuth();
+  const { state, logout, clearNotifications } = useAuth();
   const { toast } = useToast();
   const { notifications } = useNotifications();
   const navigate = useNavigate();
@@ -153,9 +153,41 @@ export default function UserDashboardPage() {
     resolver: zodResolver(installSchema),
   });
 
-  // Update unread count when notifications change
+  // Update unread count and HTML title when notifications change
   useEffect(() => {
-    setUnreadCount(notifications.length);
+    const count = notifications.length;
+    setUnreadCount(count);
+    
+    // Update HTML title with notification counter
+    const originalTitle = "XME Projects - Turn your VPS into Windows RDP seamlessly";
+    if (count > 0) {
+      document.title = `(${count}) ${originalTitle}`;
+    } else {
+      document.title = originalTitle;
+    }
+    
+    // Cleanup: Reset title when component unmounts
+    return () => {
+      document.title = originalTitle;
+    };
+  }, [notifications]);
+
+  // Auto-refresh dashboard data when installation status notifications are received
+  useEffect(() => {
+    console.log('📱 Notifications updated:', notifications.length, notifications);
+    
+    // Check if there are new installation status notifications
+    const hasInstallStatusNotifications = notifications.some(notification =>
+      notification.type === 'install_status_update' ||
+      ['completed', 'failed', 'running', 'pending'].includes(notification.status || '')
+    );
+    
+    console.log('🔍 Has install status notifications:', hasInstallStatusNotifications);
+    
+    if (hasInstallStatusNotifications) {
+      console.log('🔄 Installation status notification received, refreshing dashboard data...');
+      loadData();
+    }
   }, [notifications]);
 
   useEffect(() => {
@@ -583,8 +615,30 @@ export default function UserDashboardPage() {
               {showNotifications && (
                 <div className="absolute left-1/2 transform -translate-x-1/2 sm:left-auto sm:right-0 sm:transform-none top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1rem)] bg-background border rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
                   <div className="p-4 border-b">
-                    <h3 className="font-semibold">Notifications</h3>
-                    <p className="text-sm text-muted-foreground">{notifications.length} new notifications</p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-semibold">Notifications</h3>
+                        <p className="text-sm text-muted-foreground">{notifications.length} new notifications</p>
+                      </div>
+                      {notifications.length > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            clearNotifications();
+                            setShowNotifications(false);
+                            toast({
+                              title: "Notifications cleared",
+                              description: "All notifications have been removed.",
+                            });
+                          }}
+                          className="ml-2"
+                        >
+                          <X className="h-4 w-4 mr-1" />
+                          Clear
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   
                   {notifications.length === 0 ? (
@@ -597,7 +651,7 @@ export default function UserDashboardPage() {
                       {notifications.map((notification, index) => (
                         <div key={index} className="p-4 border-b last:border-b-0 hover:bg-muted/50">
                           <div className="flex items-start gap-3">
-                            <div className="flex-shrink-0">
+                            <div className="flex-shrink-0 mt-0.5">
                               {notification.status === 'completed' && <CheckCircle className="h-4 w-4 text-green-500" />}
                               {notification.status === 'failed' && <XCircle className="h-4 w-4 text-red-500" />}
                               {notification.status === 'running' && <Activity className="h-4 w-4 text-blue-500" />}
@@ -886,18 +940,33 @@ export default function UserDashboardPage() {
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          {(dashboardData.recentActivity || installHistory.slice(0, 3)).map((install: any) => (
-                            <div key={install.id} className="flex items-center justify-between p-3 border rounded-lg">
-                              <div className="flex items-center gap-3">
-                                <Monitor className="h-4 w-4 text-muted-foreground" />
-                                <div>
-                                  <p className="font-medium">{install.ip}</p>
-                                  <p className="text-sm text-muted-foreground">{install.win_ver}</p>
+                          <div className="space-y-3">
+                            {(dashboardData.recentActivity || installHistory).slice(0, 2).map((install: any) => (
+                              <div key={install.id} className="flex items-center justify-between p-3 border rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <Monitor className="h-4 w-4 text-muted-foreground" />
+                                  <div>
+                                    <p className="font-medium">{install.ip}</p>
+                                    <p className="text-sm text-muted-foreground">{install.win_ver}</p>
+                                  </div>
                                 </div>
+                                {getStatusBadge(install.status)}
                               </div>
-                              {getStatusBadge(install.status)}
+                            ))}
+                          </div>
+                          {installHistory.length > 2 && (
+                            <div className="pt-3 border-t">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setActiveTab('install-history')}
+                                className="w-full"
+                              >
+                                <History className="h-4 w-4 mr-2" />
+                                View All Installations ({installHistory.length})
+                              </Button>
                             </div>
-                          ))}
+                          )}
                         </div>
                       )}
                     </CardContent>
@@ -1075,7 +1144,7 @@ export default function UserDashboardPage() {
                 </div>
 
                 <Card>
-                  <CardContent className="p-6">
+                  <CardContent className="p-6 h-[550px]">
                     {installHistory.length === 0 ? (
                       <div className="text-center py-8">
                         <Monitor className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />

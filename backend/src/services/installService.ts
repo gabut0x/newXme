@@ -708,13 +708,7 @@ export class InstallService {
             [DateUtils.nowSQLite(), userId]
           );
           
-          // Send failure notification
-          const { NotificationService } = await import('./notificationService.js');
-          await NotificationService.notifyInstallationFailed(userId, {
-            ip,
-            winVersion: install.win_ver,
-            error: 'Installation failed to start within expected time. Please check your VPS configuration.'
-          });
+          // Failure notification already sent via updateInstallStatus above
           
           logger.warn('Installation failed to start within 3 minutes:', {
             installId,
@@ -729,7 +723,7 @@ export class InstallService {
           error: error.message
         });
       }
-    }, 3 * 60 * 1000); // 3 minutes
+    }, 1 * 60 * 1000); // 1 minutes
 
     // Check if installation completes within 10 minutes (if status is running)
     setTimeout(async () => {
@@ -743,13 +737,7 @@ export class InstallService {
           if (isWindowsReady) {
             await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
             
-            // Send completion notification
-            const { NotificationService } = await import('./notificationService.js');
-            await NotificationService.notifyInstallationCompleted(userId, {
-              ip,
-              winVersion: install.win_ver,
-              rdpPassword: install.passwd_rdp
-            });
+            // Completion notification already sent via updateInstallStatus above
           } else {
             // Windows not ready yet, mark for manual review
             await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but Windows RDP not accessible - requires manual verification');
@@ -863,20 +851,8 @@ export class InstallService {
           winVersion: install.win_ver
         });
 
-        // Send specific notifications for completion and failure
-        if (status === 'completed') {
-          await NotificationService.notifyInstallationCompleted(install.user_id, {
-            ip: install.ip,
-            winVersion: install.win_ver,
-            rdpPassword: install.passwd_rdp
-          });
-        } else if (status === 'failed') {
-          await NotificationService.notifyInstallationFailed(install.user_id, {
-            ip: install.ip,
-            winVersion: install.win_ver,
-            error: message || 'Installation failed'
-          });
-        }
+        // Real-time notifications are already sent via notifyInstallStatusUpdate above
+        // No need for additional email notifications for installation status changes
       }
     } catch (error: any) {
       logger.error('Failed to update install status:', {

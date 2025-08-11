@@ -62,6 +62,10 @@ export class NotificationService {
     if (userCallbacks && userCallbacks.length > 0) {
       userCallbacks.forEach(callback => {
         try {
+          logger.info('Sending notification to callback:', {
+            userId,
+            notification
+          });
           callback(notification);
         } catch (error) {
           logger.error('Error sending real-time notification:', error);
@@ -71,10 +75,11 @@ export class NotificationService {
       logger.info('Real-time notification sent to user:', {
         userId,
         notificationType: notification.type,
-        activeConnections: userCallbacks.length
+        activeConnections: userCallbacks.length,
+        notification
       });
     } else {
-      logger.debug('No active connections for user:', { userId });
+      logger.warn('No active connections for user:', { userId });
     }
   }
 
@@ -99,7 +104,8 @@ export class NotificationService {
       userId: update.userId,
       installId: update.installId,
       status: update.status,
-      message: update.message
+      message: update.message,
+      timestamp: update.timestamp
     });
   }
 
@@ -518,7 +524,7 @@ The XME Projects Team
       rdpPassword: string;
     }
   ): Promise<void> {
-    // Send real-time notification to dashboard
+    // Send real-time notification to dashboard only (no email)
     await this.notifyInstallStatusUpdate({
       installId: 0, // Will be set by caller
       userId,
@@ -529,22 +535,11 @@ The XME Projects Team
       winVersion: installData.winVersion
     });
 
-    // Send completion email
-    try {
-      const db = getDatabase();
-      const user = await db.get('SELECT email, username FROM users WHERE id = ?', [userId]);
-      
-      if (user) {
-        await this.sendInstallCompletedEmail(user.email, user.username, {
-          ip: installData.ip,
-          winVersion: installData.winVersion,
-          rdpPassword: installData.rdpPassword,
-          completedAt: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
-        });
-      }
-    } catch (error: any) {
-      logger.error('Failed to send completion email:', error);
-    }
+    logger.info('Installation completion notification sent to dashboard:', {
+      userId,
+      ip: installData.ip,
+      winVersion: installData.winVersion
+    });
   }
 
   /**
@@ -558,7 +553,7 @@ The XME Projects Team
       error: string;
     }
   ): Promise<void> {
-    // Send real-time notification to dashboard
+    // Send real-time notification to dashboard only (no email)
     await this.notifyInstallStatusUpdate({
       installId: 0, // Will be set by caller
       userId,
@@ -569,22 +564,11 @@ The XME Projects Team
       winVersion: installData.winVersion
     });
 
-    // Send failure email
-    try {
-      const db = getDatabase();
-      const user = await db.get('SELECT email, username FROM users WHERE id = ?', [userId]);
-      
-      if (user) {
-        await this.sendInstallFailedEmail(user.email, user.username, {
-          ip: installData.ip,
-          winVersion: installData.winVersion,
-          error: installData.error,
-          failedAt: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
-        });
-      }
-    } catch (error: any) {
-      logger.error('Failed to send failure email:', error);
-    }
+    logger.info('Installation failure notification sent to dashboard:', {
+      userId,
+      ip: installData.ip,
+      error: installData.error
+    });
   }
 
   /**
