@@ -385,17 +385,13 @@ class ApiService {
       throw new Error('No authentication token available');
     }
     
-    // Get the base URL, handling both relative and absolute URLs
-    const baseURL = this.api.defaults.baseURL || '';
-    const fullBaseURL = baseURL.startsWith('http') 
-      ? baseURL 
-      : `${window.location.protocol}//${window.location.host}${baseURL}`;
+    // Create the notification stream URL with proper token handling
+    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+    const streamURL = `${baseURL}/user/notifications/stream?token=${encodeURIComponent(token)}`;
     
-    // Create URL with auth token as query parameter since EventSource can't send custom headers
-    const url = new URL(`${fullBaseURL}/user/notifications/stream`);
-    url.searchParams.set('token', token);
+    console.log('Creating notification stream:', streamURL);
     
-    const eventSource = new EventSource(url.toString());
+    const eventSource = new EventSource(streamURL);
 
     eventSource.onmessage = (event) => {
       try {
@@ -408,6 +404,12 @@ class ApiService {
 
     eventSource.onerror = (error) => {
       console.error('Notification stream error:', error);
+      
+      // Attempt to reconnect after 5 seconds
+      setTimeout(() => {
+        console.log('Attempting to reconnect notification stream...');
+        eventSource.close();
+      }, 5000);
     };
 
     return eventSource;

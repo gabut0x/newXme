@@ -1,6 +1,7 @@
 import express from 'express';
 import { Request, Response } from 'express';
 import { InstallService } from '../services/installService.js';
+import { getDatabase } from '../database/init.js';
 import { 
   authenticateToken, 
   requireVerifiedUser,
@@ -11,7 +12,8 @@ import {
 import { auditLogger } from '../middleware/security.js';
 import { installDataSchema } from '../types/user.js';
 import { logger } from '../utils/logger.js';
-import { InstallService } from '../services/installService.js';
+import { NotFoundError } from '../middleware/errorHandler.js';
+import { ApiResponse } from '../types/user.js';
 import { z } from 'zod';
 
 const router = express.Router();

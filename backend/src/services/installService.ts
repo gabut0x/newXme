@@ -692,7 +692,7 @@ export class InstallService {
     userId: number,
     ip: string
   ): Promise<void> {
-    // Check if installation starts running within 2 minutes
+    // Check if installation starts running within 3 minutes
     setTimeout(async () => {
       try {
         const install = await this.getInstallById(installId);
@@ -711,37 +711,33 @@ export class InstallService {
           // Send failure notification
           const { NotificationService } = await import('./notificationService.js');
           await NotificationService.notifyInstallationFailed(userId, {
-            installId,
-            installId,
-            installId,
-            installId,
             ip,
             winVersion: install.win_ver,
             error: 'Installation failed to start within expected time. Please check your VPS configuration.'
           });
           
-          logger.warn('Installation failed to start within 2 minutes:', {
+          logger.warn('Installation failed to start within 3 minutes:', {
             installId,
             userId,
             ip
           });
         }
       } catch (error: any) {
-        logger.error('Installation monitoring (2min check) failed:', {
+        logger.error('Installation monitoring (3min check) failed:', {
           installId,
           userId,
           error: error.message
         });
       }
-    }, 2 * 60 * 1000); // 2 minutes
+    }, 3 * 60 * 1000); // 3 minutes
 
-    // Check if installation completes within 5.5 minutes (if status is running)
+    // Check if installation completes within 10 minutes (if status is running)
     setTimeout(async () => {
       try {
         const install = await this.getInstallById(installId);
         
         if (install && install.status === 'running') {
-          // Check if Windows is accessible via RDP (port 22)
+          // Check if Windows is accessible via RDP (port 3389)
           const isWindowsReady = await this.checkWindowsRDP(ip);
           
           if (isWindowsReady) {
@@ -754,18 +750,21 @@ export class InstallService {
               winVersion: install.win_ver,
               rdpPassword: install.passwd_rdp
             });
+          } else {
+            // Windows not ready yet, mark for manual review
+            await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but Windows RDP not accessible - requires manual verification');
           }
         }
       } catch (error: any) {
-        logger.error('Installation monitoring (5.5min check) failed:', {
+        logger.error('Installation monitoring (10min check) failed:', {
           installId,
           userId,
           error: error.message
         });
       }
-    }, 5.5 * 60 * 1000); // 5.5 minutes
+    }, 10 * 60 * 1000); // 10 minutes
 
-    // Final check after 15 minutes - mark as needs manual review if still running
+    // Final check after 20 minutes - mark as needs manual review if still running
     setTimeout(async () => {
       try {
         const install = await this.getInstallById(installId);
@@ -777,17 +776,17 @@ export class InstallService {
             installId,
             userId,
             ip,
-            duration: '15+ minutes'
+            duration: '20+ minutes'
           });
         }
       } catch (error: any) {
-        logger.error('Installation monitoring (15min check) failed:', {
+        logger.error('Installation monitoring (20min check) failed:', {
           installId,
           userId,
           error: error.message
         });
       }
-    }, 15 * 60 * 1000); // 15 minutes
+    }, 20 * 60 * 1000); // 20 minutes
   }
 
   /**
@@ -795,7 +794,7 @@ export class InstallService {
    */
   private static async checkWindowsRDP(ip: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port: 22, timeout: 10000 });
+      const socket = createConnection({ host: ip, port: 3389, timeout: 10000 });
       
       socket.on('connect', () => {
         socket.destroy();
@@ -883,9 +882,64 @@ export class InstallService {
     message: string
   ): Promise<void> {
     try {
+      const db = getDatabase();
+      
+      // Get install data with user info for notifications
+      const install = await db.get(
+        'SELECT user_id, ip, win_ver, passwd_rdp FROM install_data WHERE id = ?',
+        [installId]
+      );
+      
+      if (!install) {
+        logger.error('Install not found for progress update:', { installId });
+        return;
+      }
+
       // Update main status
       await this.updateInstallStatus(installId, status, message);
 
+      // Handle specific progress steps
+      if (step === 'install_complete' && status === 'completed') {
+        // Installation script completed, now wait for Windows to boot
+        setTimeout(async () => {
+          try {
+            // Check if Windows RDP is accessible after 3 minutes
+            const isWindowsReady = await this.checkWindowsRDP(install.ip);
+            
+            if (isWindowsReady) {
+              await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
+              
+              // Send completion notification
+              const { NotificationService } = await import('./notificationService.js');
+              await NotificationService.notifyInstallationCompleted(install.user_id, {
+                ip: install.ip,
+                winVersion: install.win_ver,
+                rdpPassword: install.passwd_rdp
+              });
+            } else {
+              // Windows not ready yet, check again in 2 minutes
+              setTimeout(async () => {
+                const isReady = await this.checkWindowsRDP(install.ip);
+                if (isReady) {
+                  await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
+                  
+                  const { NotificationService } = await import('./notificationService.js');
+                  await NotificationService.notifyInstallationCompleted(install.user_id, {
+                    ip: install.ip,
+                    winVersion: install.win_ver,
+                    rdpPassword: install.passwd_rdp
+                  });
+                } else {
+                  await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but Windows RDP not accessible - requires manual verification');
+                }
+              }, 2 * 60 * 1000); // 2 minutes
+            }
+          } catch (error: any) {
+            logger.error('Error checking Windows readiness:', error);
+            await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but verification failed - requires manual check');
+          }
+        }, 3 * 60 * 1000); // 3 minutes after script completion
+      }
       logger.info('Installation progress updated:', {
         installId,
         step,
