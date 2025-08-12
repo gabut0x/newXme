@@ -18,8 +18,8 @@ import { ApiResponse } from '../types/user.js';
 const router = express.Router();
 
 // Configuration for download protection
-const BLOCKED_USER_AGENTS_PATTERN = /bot|crawler|spider|scraper/i;
-const ALLOWED_USER_AGENTS = ['curl', 'wget', 'aria2c', 'axel'];
+const BLOCKED_USER_AGENTS_PATTERN = /bot|crawler|spider|scraper|mozilla|chrome|safari|firefox|edge/i;
+const ALLOWED_USER_AGENTS = ['curl', 'wget'];
 const BASE_URLS: { [key: string]: string } = {
   'us': process.env['US_CDN_URL'] || 'https://us-cdn.example.com',
   'sg': process.env['SG_CDN_URL'] || 'https://sg-cdn.example.com',
@@ -145,9 +145,6 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lkluc3RhbG
         }
       }
 
-      // Log download access for tracking
-      await InstallService.handleDownloadAccess(ip, filename, userAgent, region);
-
       // Construct file URL and redirect
       const fileUrl = `${BASE_URLS[region]}/${filename}`;
       
@@ -241,51 +238,6 @@ router.get('/status/:id',
   })
 );
 
-/**
- * Cancel installation (if still pending)
- */
-router.post('/cancel/:id',
-  authenticateToken,
-  requireVerifiedUser,
-  validateNumericId('id'),
-  auditLogger('CANCEL_INSTALLATION'),
-  asyncHandler(async (req: Request, res: Response) => {
-    try {
-      const idParam = req.params['id'];
-      if (!idParam) {
-        res.status(400).json({
-          success: false,
-          message: 'Installation ID is required'
-        });
-        return;
-      }
-      
-      const installId = parseInt(idParam);
-      
-      if (!req.user) {
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required'
-        });
-        return;
-      }
-
-      await InstallService.cancelInstallation(installId, req.user.id);
-
-      res.json({
-        success: true,
-        message: 'Installation cancelled successfully. Your quota has been refunded.'
-      });
-    } catch (error: any) {
-      logger.error('Failed to cancel installation:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to cancel installation',
-        error: 'CANCELLATION_FAILED'
-      });
-    }
-  })
-);
 
 /**
  * Get user's active installations

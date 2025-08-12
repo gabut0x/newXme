@@ -24,10 +24,10 @@ import {
   CreateProductRequest,
   PaymentMethod
 } from '@/services/api';
-import { 
-  Code, 
-  LogOut, 
-  Settings, 
+import {
+  Code,
+  LogOut,
+  Settings,
   Bell,
   Monitor,
   Package,
@@ -48,7 +48,10 @@ import {
   X,
   UserPlus,
   Coins,
-  LayoutDashboard
+  LayoutDashboard,
+  MessageSquare,
+  Webhook,
+  Bot
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -69,7 +72,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 export default function AdminDashboardPage() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'windows' | 'products' | 'users' | 'installs' | 'payments'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'windows' | 'products' | 'users' | 'installs' | 'payments' | 'telegram'>('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -80,6 +83,15 @@ export default function AdminDashboardPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [installData, setInstallData] = useState<InstallData[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [telegramStatus, setTelegramStatus] = useState<{
+    botInfo: any;
+    webhookInfo: any;
+    isLoading: boolean;
+  }>({
+    botInfo: null,
+    webhookInfo: null,
+    isLoading: false
+  });
   
   // Dialog states
   const [windowsDialog, setWindowsDialog] = useState(false);
@@ -128,6 +140,13 @@ export default function AdminDashboardPage() {
     
     loadData();
   }, [state.user, navigate]);
+
+  // Load telegram status when telegram tab is active
+  useEffect(() => {
+    if (activeTab === 'telegram') {
+      loadTelegramStatus();
+    }
+  }, [activeTab]);
 
   const loadData = async () => {
     try {
@@ -440,6 +459,133 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleDeleteInstallData = async (installId: number) => {
+    if (!confirm('Are you sure you want to delete this install data?')) return;
+    
+    try {
+      await apiService.deleteInstallData(installId);
+      toast({ title: 'Install data deleted successfully' });
+      await loadData();
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Delete failed',
+        description: error.response?.data?.message || 'Please try again.',
+      });
+    }
+  };
+
+  // Telegram handlers
+  const loadTelegramStatus = async () => {
+    try {
+      setTelegramStatus(prev => ({ ...prev, isLoading: true }));
+      
+      const token = apiService.getAuthToken();
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+      
+      const [botResponse, webhookResponse] = await Promise.all([
+        fetch(`${apiBaseUrl}/telegram/bot-info`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch(`${apiBaseUrl}/telegram/webhook-info`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      ]);
+
+      const botData = botResponse.ok ? await botResponse.json() : null;
+      const webhookData = webhookResponse.ok ? await webhookResponse.json() : null;
+
+      setTelegramStatus({
+        botInfo: botData?.data || null,
+        webhookInfo: webhookData?.data || null,
+        isLoading: false
+      });
+    } catch (error) {
+      console.error('Error loading Telegram status:', error);
+      setTelegramStatus(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
+  const handleSetupWebhook = async () => {
+    try {
+      setIsSubmitting(true);
+      
+      const token = apiService.getAuthToken();
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+      
+      const response = await fetch(`${apiBaseUrl}/telegram/setup`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        toast({
+          title: 'Webhook setup successful',
+          description: 'Telegram bot webhook has been configured automatically'
+        });
+        await loadTelegramStatus();
+      } else {
+        throw new Error(result.message || 'Setup failed');
+      }
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Setup failed',
+        description: error.message || 'Failed to setup webhook'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSetCustomWebhook = async (webhookUrl: string) => {
+    try {
+      setIsSubmitting(true);
+      
+      const token = apiService.getAuthToken();
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+      
+      const response = await fetch(`${apiBaseUrl}/telegram/set-webhook`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ webhook_url: webhookUrl })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        toast({
+          title: 'Custom webhook set',
+          description: 'Webhook URL updated successfully'
+        });
+        await loadTelegramStatus();
+      } else {
+        throw new Error(result.message || 'Failed to set webhook');
+      }
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Webhook setup failed',
+        description: error.message || 'Failed to set custom webhook'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const getWindowsVersionName = (slug: string) => {
+    const version = windowsVersions.find(v => v.slug === slug);
+    return version ? version.name : slug;
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
@@ -486,6 +632,11 @@ export default function AdminDashboardPage() {
       id: 'payments',
       label: 'Payment Methods',
       icon: CreditCard,
+    },
+    {
+      id: 'telegram',
+      label: 'Telegram Bot',
+      icon: Bot,
     },
   ];
 
@@ -702,7 +853,7 @@ export default function AdminDashboardPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      <Button 
+                      <Button
                         onClick={() => setActiveTab('windows')}
                         className="h-16 flex items-center justify-start gap-3 text-left"
                         variant="outline"
@@ -712,11 +863,25 @@ export default function AdminDashboardPage() {
                         </div>
                         <div>
                           <p className="font-medium">Manage Windows</p>
-                          <p className="text-xs md:text-sm text-muted-foreground">Add/edit versions</p>
+                          <p className="text-xs md:text-sm text-muted-foreground">Add/edit versions ({windowsVersions.length})</p>
                         </div>
                       </Button>
                       
-                      <Button 
+                      <Button
+                        onClick={() => setActiveTab('products')}
+                        className="h-16 flex items-center justify-start gap-3 text-left"
+                        variant="outline"
+                      >
+                        <div className="h-10 w-10 bg-green-500/10 rounded-lg flex items-center justify-center">
+                          <Package className="h-5 w-5 text-green-600" />
+                        </div>
+                        <div>
+                          <p className="font-medium">Manage Products</p>
+                          <p className="text-xs md:text-sm text-muted-foreground">Products & services ({products.length})</p>
+                        </div>
+                      </Button>
+
+                      <Button
                         onClick={() => setActiveTab('users')}
                         className="h-16 flex items-center justify-start gap-3 text-left"
                         variant="outline"
@@ -726,11 +891,25 @@ export default function AdminDashboardPage() {
                         </div>
                         <div>
                           <p className="font-medium">Manage Users</p>
-                          <p className="text-xs md:text-sm text-muted-foreground">User administration</p>
+                          <p className="text-xs md:text-sm text-muted-foreground">User administration ({users.length})</p>
                         </div>
                       </Button>
 
-                      <Button 
+                      <Button
+                        onClick={() => setActiveTab('installs')}
+                        className="h-16 flex items-center justify-start gap-3 text-left"
+                        variant="outline"
+                      >
+                        <div className="h-10 w-10 bg-purple-500/10 rounded-lg flex items-center justify-center">
+                          <Database className="h-5 w-5 text-purple-600" />
+                        </div>
+                        <div>
+                          <p className="font-medium">Install Data</p>
+                          <p className="text-xs md:text-sm text-muted-foreground">View installations ({installData.length})</p>
+                        </div>
+                      </Button>
+
+                      <Button
                         onClick={() => setActiveTab('payments')}
                         className="h-16 flex items-center justify-start gap-3 text-left"
                         variant="outline"
@@ -740,7 +919,21 @@ export default function AdminDashboardPage() {
                         </div>
                         <div>
                           <p className="font-medium">Payment Settings</p>
-                          <p className="text-xs md:text-sm text-muted-foreground">Configure payments</p>
+                          <p className="text-xs md:text-sm text-muted-foreground">Configure payments ({paymentMethods.filter(p => p.is_enabled).length} active)</p>
+                        </div>
+                      </Button>
+
+                      <Button
+                        onClick={() => navigate('/dashboard')}
+                        className="h-16 flex items-center justify-start gap-3 text-left"
+                        variant="outline"
+                      >
+                        <div className="h-10 w-10 bg-indigo-500/10 rounded-lg flex items-center justify-center">
+                          <Eye className="h-5 w-5 text-indigo-600" />
+                        </div>
+                        <div>
+                          <p className="font-medium">User Dashboard</p>
+                          <p className="text-xs md:text-sm text-muted-foreground">Switch to user view</p>
                         </div>
                       </Button>
                     </div>
@@ -819,6 +1012,7 @@ export default function AdminDashboardPage() {
                       <Table>
                         <TableHeader>
                           <TableRow>
+                            <TableHead className="w-12">#</TableHead>
                             <TableHead>Name</TableHead>
                             <TableHead>Slug</TableHead>
                             <TableHead className="hidden md:table-cell">Created</TableHead>
@@ -826,8 +1020,9 @@ export default function AdminDashboardPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {windowsVersions.map((version) => (
+                          {windowsVersions.map((version, index) => (
                             <TableRow key={version.id}>
+                              <TableCell className="font-medium">{index + 1}</TableCell>
                               <TableCell className="font-medium">{version.name}</TableCell>
                               <TableCell className="font-mono">{version.slug}</TableCell>
                               <TableCell className="hidden md:table-cell">{new Date(version.created_at).toLocaleDateString()}</TableCell>
@@ -973,6 +1168,7 @@ export default function AdminDashboardPage() {
                       <Table>
                         <TableHeader>
                           <TableRow>
+                            <TableHead className="w-12">#</TableHead>
                             <TableHead>Name</TableHead>
                             <TableHead>Price</TableHead>
                             <TableHead className="hidden md:table-cell">Created</TableHead>
@@ -980,8 +1176,9 @@ export default function AdminDashboardPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {products.map((product) => (
+                          {products.map((product, index) => (
                             <TableRow key={product.id}>
+                              <TableCell className="font-medium">{index + 1}</TableCell>
                               <TableCell className="font-medium">{product.name}</TableCell>
                               <TableCell>{product.price} IDR</TableCell>
                               <TableCell className="hidden md:table-cell">{new Date(product.created_at).toLocaleDateString()}</TableCell>
@@ -1038,6 +1235,7 @@ export default function AdminDashboardPage() {
                       <Table>
                         <TableHeader>
                           <TableRow>
+                            <TableHead className="w-12">#</TableHead>
                             <TableHead>Username</TableHead>
                             <TableHead className="hidden md:table-cell">Email</TableHead>
                             <TableHead>Status</TableHead>
@@ -1047,8 +1245,9 @@ export default function AdminDashboardPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {users.map((user) => (
+                          {users.map((user, index) => (
                             <TableRow key={user.id}>
+                              <TableCell className="font-medium">{index + 1}</TableCell>
                               <TableCell className="font-medium">
                                 <div className="flex items-center gap-2">
                                   <Avatar className="h-6 w-6">
@@ -1134,6 +1333,7 @@ export default function AdminDashboardPage() {
                       <Table>
                         <TableHeader>
                           <TableRow>
+                            <TableHead className="w-12">#</TableHead>
                             <TableHead>User</TableHead>
                             <TableHead>IP Address</TableHead>
                             <TableHead className="hidden md:table-cell">Windows Version</TableHead>
@@ -1143,28 +1343,40 @@ export default function AdminDashboardPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {installData.map((install) => (
+                          {installData.map((install, index) => (
                             <TableRow key={install.id}>
+                              <TableCell className="font-medium">{index + 1}</TableCell>
                               <TableCell>{install.username}</TableCell>
                               <TableCell className="font-mono">{install.ip}</TableCell>
-                              <TableCell className="hidden md:table-cell">{install.win_ver}</TableCell>
+                              <TableCell className="hidden md:table-cell">{getWindowsVersionName(install.win_ver)}</TableCell>
                               <TableCell>{getStatusBadge(install.status)}</TableCell>
                               <TableCell className="hidden lg:table-cell">{new Date(install.created_at).toLocaleDateString()}</TableCell>
                               <TableCell>
-                                <Select
-                                  value={install.status}
-                                  onValueChange={(value) => handleUpdateInstallStatus(install.id, value)}
-                                >
-                                  <SelectTrigger className="w-28">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="pending">Pending</SelectItem>
-                                    <SelectItem value="running">Running</SelectItem>
-                                    <SelectItem value="completed">Completed</SelectItem>
-                                    <SelectItem value="failed">Failed</SelectItem>
-                                  </SelectContent>
-                                </Select>
+                                <div className="flex gap-2">
+                                  <Select
+                                    value={install.status}
+                                    onValueChange={(value) => handleUpdateInstallStatus(install.id, value)}
+                                  >
+                                    <SelectTrigger className="w-28">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="pending">Pending</SelectItem>
+                                      <SelectItem value="running">Running</SelectItem>
+                                      <SelectItem value="completed">Completed</SelectItem>
+                                      <SelectItem value="failed">Failed</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleDeleteInstallData(install.id)}
+                                    title="Delete Install Data"
+                                    className="text-destructive hover:text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </TableCell>
                             </TableRow>
                           ))}
@@ -1216,6 +1428,7 @@ export default function AdminDashboardPage() {
                       <Table>
                         <TableHeader>
                           <TableRow>
+                            <TableHead className="w-12">#</TableHead>
                             <TableHead>Code</TableHead>
                             <TableHead>Name</TableHead>
                             <TableHead className="hidden md:table-cell">Type</TableHead>
@@ -1225,14 +1438,15 @@ export default function AdminDashboardPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {paymentMethods.map((method) => (
+                          {paymentMethods.map((method, index) => (
                             <TableRow key={method.code}>
+                              <TableCell className="font-medium">{index + 1}</TableCell>
                               <TableCell className="font-mono">{method.code}</TableCell>
                               <TableCell>
                                 <div className="flex items-center gap-3">
                                   {method.icon_url && (
-                                    <img 
-                                      src={method.icon_url} 
+                                    <img
+                                      src={method.icon_url}
                                       alt={method.name}
                                       className="w-6 h-6 object-contain"
                                     />
@@ -1303,6 +1517,205 @@ export default function AdminDashboardPage() {
                         </p>
                       </div>
                     )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Telegram Bot Tab */}
+            {activeTab === 'telegram' && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-foreground mb-2">Telegram Bot Management</h2>
+                    <p className="text-xs md:text-sm text-muted-foreground">Configure and manage Telegram bot integration</p>
+                  </div>
+                  <Button
+                    onClick={() => loadTelegramStatus()}
+                    disabled={telegramStatus.isLoading}
+                    variant="outline"
+                  >
+                    {telegramStatus.isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Settings className="h-4 w-4 mr-2" />
+                    )}
+                    Refresh Status
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Bot Status Card */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Bot className="h-5 w-5" />
+                        Bot Status
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {telegramStatus.botInfo ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span className="text-sm font-medium">Bot Active</span>
+                          </div>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Bot ID:</span>
+                              <span className="font-mono">{telegramStatus.botInfo.id}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Username:</span>
+                              <span className="font-mono">@{telegramStatus.botInfo.username}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Name:</span>
+                              <span>{telegramStatus.botInfo.first_name}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Can Read Groups:</span>
+                              <Badge variant={telegramStatus.botInfo.can_read_all_group_messages ? "default" : "secondary"}>
+                                {telegramStatus.botInfo.can_read_all_group_messages ? "Yes" : "No"}
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-destructive">
+                          <AlertCircle className="h-4 w-4" />
+                          <span className="text-sm">Bot token not configured or invalid</span>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Webhook Status Card */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Webhook className="h-5 w-5" />
+                        Webhook Status
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {telegramStatus.webhookInfo ? (
+                        <div className="space-y-3">
+                          {telegramStatus.webhookInfo.url ? (
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                              <span className="text-sm font-medium">Webhook Active</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <AlertCircle className="h-4 w-4 text-yellow-600" />
+                              <span className="text-sm font-medium">No Webhook Set</span>
+                            </div>
+                          )}
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">URL:</span>
+                              <span className="font-mono text-xs break-all">
+                                {telegramStatus.webhookInfo.url || 'Not set'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Pending Updates:</span>
+                              <Badge variant="outline">
+                                {telegramStatus.webhookInfo.pending_update_count || 0}
+                              </Badge>
+                            </div>
+                            {telegramStatus.webhookInfo.last_error_message && (
+                              <div className="mt-3 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+                                <p className="text-xs text-destructive font-medium">Last Error:</p>
+                                <p className="text-xs text-destructive">
+                                  {telegramStatus.webhookInfo.last_error_message}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-sm">Loading webhook info...</span>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Webhook Management */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Webhook Management</CardTitle>
+                    <CardDescription>Configure webhook URL for receiving Telegram updates</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <div className="flex gap-4">
+                        <Button
+                          onClick={handleSetupWebhook}
+                          disabled={isSubmitting}
+                          className="flex items-center gap-2"
+                        >
+                          {isSubmitting ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Settings className="h-4 w-4" />
+                          )}
+                          Auto Setup Webhook
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            const url = prompt('Enter custom webhook URL:');
+                            if (url) handleSetCustomWebhook(url);
+                          }}
+                          disabled={isSubmitting}
+                        >
+                          <Webhook className="h-4 w-4 mr-2" />
+                          Set Custom URL
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          onClick={() => handleSetCustomWebhook('')}
+                          disabled={isSubmitting}
+                        >
+                          <X className="h-4 w-4 mr-2" />
+                          Remove Webhook
+                        </Button>
+                      </div>
+
+                      <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
+                        <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">
+                          Setup Instructions
+                        </h4>
+                        <div className="text-sm text-blue-800 dark:text-blue-200 space-y-1">
+                          <p>• <strong>Auto Setup:</strong> Uses APP_URL environment variable</p>
+                          <p>• <strong>Custom URL:</strong> For development with ngrok or custom domains</p>
+                          <p>• <strong>Remove:</strong> Disables webhook (useful for troubleshooting)</p>
+                        </div>
+                      </div>
+
+                      {telegramStatus.botInfo?.username && (
+                        <div className="p-4 bg-green-50 dark:bg-green-950/20 rounded-lg">
+                          <h4 className="font-medium text-green-900 dark:text-green-100 mb-2">
+                            Bot Link
+                          </h4>
+                          <p className="text-sm text-green-800 dark:text-green-200">
+                            <a
+                              href={`https://t.me/${telegramStatus.botInfo.username}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline"
+                            >
+                              https://t.me/{telegramStatus.botInfo.username}
+                            </a>
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               </div>

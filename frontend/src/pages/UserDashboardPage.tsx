@@ -121,7 +121,7 @@ export default function UserDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingTopup, setIsLoadingTopup] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'install' | 'install-history' | 'topup-history'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'install' | 'install-history' | 'topup-history' | 'settings'>('dashboard');
   const [showTopupModal, setShowTopupModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentModalData, setPaymentModalData] = useState<PaymentModalData | null>(null);
@@ -132,6 +132,16 @@ export default function UserDashboardPage() {
   const [showVpsPassword, setShowVpsPassword] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  
+  // Settings states
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [isConnectingTelegram, setIsConnectingTelegram] = useState(false);
+  const [telegramNotifications, setTelegramNotifications] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
   
   // Pagination states
   const [installHistoryPage, setInstallHistoryPage] = useState(1);
@@ -172,27 +182,85 @@ export default function UserDashboardPage() {
     };
   }, [notifications]);
 
-  // Auto-refresh dashboard data when installation status notifications are received
+  // Auto-refresh dashboard data when installation status or telegram connection notifications are received
   useEffect(() => {
     console.log('📱 Notifications updated:', notifications.length, notifications);
     
     // Check if there are new installation status notifications
     const hasInstallStatusNotifications = notifications.some(notification =>
       notification.type === 'install_status_update' ||
-      ['completed', 'failed', 'running', 'pending'].includes(notification.status || '')
+      ['completed', 'failed', 'running', 'pending', 'preparing'].includes(notification.status || '')
+    );
+    
+    // Check if there are new telegram connection notifications
+    const hasTelegramConnectionNotifications = notifications.some(notification =>
+      notification.type === 'telegram_connection_success'
     );
     
     console.log('🔍 Has install status notifications:', hasInstallStatusNotifications);
+    console.log('🔍 Has telegram connection notifications:', hasTelegramConnectionNotifications);
     
     if (hasInstallStatusNotifications) {
       console.log('🔄 Installation status notification received, refreshing dashboard data...');
       loadData();
+    }
+    
+    if (hasTelegramConnectionNotifications) {
+      console.log('🔄 Telegram connection notification received, refreshing dashboard data...');
+      loadData();
+      
+      // Stop connecting state and show success message
+      setIsConnectingTelegram(false);
+      
+      // Find the telegram connection notification
+      const telegramNotification = notifications.find(n => n.type === 'telegram_connection_success');
+      if (telegramNotification) {
+        toast({
+          title: '🎉 Telegram Connected Successfully!',
+          description: telegramNotification.message,
+        });
+        
+        // Auto-enable notifications
+        const enableNotifications = async () => {
+          try {
+            await apiService.updateTelegramNotifications({ enabled: true });
+            setTelegramNotifications(true);
+          } catch (error) {
+            console.error('Failed to auto-enable Telegram notifications:', error);
+            setTelegramNotifications(true); // Still update local state
+          }
+        };
+        
+        enableNotifications();
+      }
     }
   }, [notifications]);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  // Initialize settings states when user data is loaded
+  useEffect(() => {
+    if (dashboardData?.user) {
+      // Initialize telegram notifications state based on user's current setting
+      setTelegramNotifications(dashboardData.user.telegram_notifications || false);
+    }
+  }, [dashboardData]);
+
+  // Check connection status only when user is actively trying to connect
+  useEffect(() => {
+    if (activeTab === 'settings' && dashboardData?.user && !dashboardData.user.telegram && isConnectingTelegram) {
+      const interval = setInterval(() => {
+        loadData(); // Refresh user data to check if Telegram was connected
+      }, 3000); // Check every 3 seconds, only when actively connecting
+      
+      return () => clearInterval(interval);
+    }
+  }, [activeTab, dashboardData?.user?.telegram, isConnectingTelegram]);
+
+  // This useEffect is no longer needed as we now use real-time notifications
+  // The Telegram connection success is handled in the notifications useEffect above
 
   // Load topup history when topup tab is selected
   useEffect(() => {
@@ -354,15 +422,15 @@ export default function UserDashboardPage() {
           <Clock className="w-3 h-3 mr-1" />
           Pending
         </Badge>;
+      case 'preparing':
+        return <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+          <RefreshCw className="w-3 h-3 mr-1" />
+          Preparing
+        </Badge>;
       case 'failed':
         return <Badge variant="destructive">
           <XCircle className="w-3 h-3 mr-1" />
           Failed
-        </Badge>;
-      case 'cancelled':
-        return <Badge variant="secondary">
-          <XCircle className="w-3 h-3 mr-1" />
-          Cancelled
         </Badge>;
       case 'manual_review':
         return <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
@@ -418,8 +486,8 @@ export default function UserDashboardPage() {
       setPaymentModalData({
         reference: transaction.reference,
         checkout_url: transaction.checkout_url,
-        qr_url: transaction.qr_url || `https://tripay.co.id/qr/${transaction.reference}`,
-        pay_code: transaction.pay_code,
+        qr_url: (transaction as any).qr_url || `https://tripay.co.id/qr/${transaction.reference}`,
+        pay_code: (transaction as any).pay_code,
         payment_name: transaction.payment_method,
         final_amount: transaction.final_amount,
         status: transaction.status,
@@ -515,6 +583,134 @@ export default function UserDashboardPage() {
     );
   };
 
+  // Password update handler
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast({
+        variant: 'destructive',
+        title: 'Password mismatch',
+        description: 'New password and confirm password must match.',
+      });
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 6) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid password',
+        description: 'Password must be at least 6 characters long.',
+      });
+      return;
+    }
+
+    try {
+      setIsUpdatingPassword(true);
+      
+      // Call API to update password
+      await apiService.updatePassword({
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword
+      });
+      
+      toast({
+        title: 'Password updated',
+        description: 'Your password has been updated successfully.',
+      });
+      
+      setPasswordForm({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      });
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Update failed',
+        description: error.response?.data?.message || 'Failed to update password.',
+      });
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
+
+  // Telegram connection handler
+  const handleConnectTelegram = async () => {
+    try {
+      setIsConnectingTelegram(true);
+      
+      // Call API to get Telegram connection URL/token
+      const response = await apiService.connectTelegram();
+      
+      if (response.data.success && response.data.data?.telegramBotUrl) {
+        // Open Telegram bot link in new tab
+        window.open(response.data.data.telegramBotUrl, '_blank');
+        
+        toast({
+          title: 'Telegram Connection Started',
+          description: `Connection link generated! The link expires in ${(response.data.data as any).expiresInMinutes || 10} minutes.`,
+        });
+      }
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Connection failed',
+        description: error.response?.data?.message || 'Failed to initiate Telegram connection.',
+      });
+    } finally {
+      setIsConnectingTelegram(false);
+    }
+  };
+
+  // Disconnect Telegram handler
+  const handleDisconnectTelegram = async () => {
+    if (!confirm('Are you sure you want to disconnect your Telegram account?')) {
+      return;
+    }
+
+    try {
+      // Call API to disconnect Telegram
+      const response = await apiService.disconnectTelegram();
+      
+      if (response.data.success) {
+        toast({
+          title: 'Telegram Disconnected',
+          description: 'Your Telegram account has been disconnected successfully.',
+        });
+        
+        // Refresh user data
+        await loadData();
+        setTelegramNotifications(false);
+      }
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Disconnect failed',
+        description: error.response?.data?.message || 'Failed to disconnect Telegram account.',
+      });
+    }
+  };
+
+  // Toggle Telegram notifications
+  const handleToggleTelegramNotifications = async (enabled: boolean) => {
+    try {
+      await apiService.updateTelegramNotifications({ enabled });
+      setTelegramNotifications(enabled);
+      
+      toast({
+        title: 'Notification settings updated',
+        description: `Telegram notifications ${enabled ? 'enabled' : 'disabled'} successfully.`,
+      });
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Update failed',
+        description: error.response?.data?.message || 'Failed to update notification settings.',
+      });
+    }
+  };
+
   // Sidebar menu items
   const menuItems = [
     {
@@ -536,6 +732,11 @@ export default function UserDashboardPage() {
       id: 'topup-history',
       label: 'Topup History',
       icon: CreditCard,
+    },
+    {
+      id: 'settings',
+      label: 'Settings',
+      icon: Settings,
     },
   ];
 
@@ -647,35 +848,38 @@ export default function UserDashboardPage() {
                       <p>No new notifications</p>
                     </div>
                   ) : (
-                    <div className="max-h-64 overflow-y-auto">
-                      {notifications.map((notification, index) => (
-                        <div key={index} className="p-4 border-b last:border-b-0 hover:bg-muted/50">
-                          <div className="flex items-start gap-3">
-                            <div className="flex-shrink-0 mt-0.5">
-                              {notification.status === 'completed' && <CheckCircle className="h-4 w-4 text-green-500" />}
-                              {notification.status === 'failed' && <XCircle className="h-4 w-4 text-red-500" />}
-                              {notification.status === 'running' && <Activity className="h-4 w-4 text-blue-500" />}
-                              {notification.status === 'pending' && <Clock className="h-4 w-4 text-yellow-500" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium">{notification.message}</p>
-                              {notification.ip && (
-                                <p className="text-xs text-muted-foreground">IP: {notification.ip}</p>
-                              )}
-                              <p className="text-xs text-muted-foreground">
-                                {new Date(notification.timestamp).toLocaleString('id-ID', {
-                                  timeZone: 'Asia/Jakarta',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  day: 'numeric',
-                                  month: 'short'
-                                })}
-                              </p>
+                    <ScrollArea className="h-64">
+                      <div>
+                        {notifications.map((notification, index) => (
+                          <div key={index} className="p-4 border-b last:border-b-0 hover:bg-muted/50">
+                            <div className="flex items-start gap-3">
+                              <div className="flex-shrink-0 mt-0.5">
+                                {notification.status === 'completed' && <CheckCircle className="h-4 w-4 text-green-500" />}
+                                {notification.status === 'failed' && <XCircle className="h-4 w-4 text-red-500" />}
+                                {notification.status === 'running' && <Activity className="h-4 w-4 text-blue-500" />}
+                                {notification.status === 'pending' && <Clock className="h-4 w-4 text-yellow-500" />}
+                                {notification.status === 'preparing' && <RefreshCw className="h-4 w-4 text-purple-500" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium">{notification.message}</p>
+                                {notification.ip && (
+                                  <p className="text-xs text-muted-foreground">IP: {notification.ip}</p>
+                                )}
+                                <p className="text-xs text-muted-foreground">
+                                  {new Date(notification.timestamp).toLocaleString('id-ID', {
+                                    timeZone: 'Asia/Jakarta',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    day: 'numeric',
+                                    month: 'short'
+                                  })}
+                                </p>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
                   )}
                 </div>
               )}
@@ -699,7 +903,10 @@ export default function UserDashboardPage() {
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="cursor-pointer">
+                <DropdownMenuItem
+                  onClick={() => setActiveTab('settings')}
+                  className="cursor-pointer"
+                >
                   <Settings className="h-4 w-4 mr-2" />
                   Settings
                 </DropdownMenuItem>
@@ -993,17 +1200,19 @@ export default function UserDashboardPage() {
                   <CardContent>
                     {dashboardData.stats.quota <= 0 ? (
                       <Alert>
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertDescription>
-                          You don't have enough quota to install Windows. Please top up your quota first.
-                          <Button 
-                            onClick={() => setShowTopupModal(true)}
-                            variant="link" 
-                            className="p-0 ml-2 h-auto"
-                          >
-                            Top up now
-                          </Button>
-                        </AlertDescription>
+                        <div className="flex items-start space-x-3">
+                          <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                          <AlertDescription>
+                            You don't have enough quota to install Windows. Please top up your quota first.
+                            <Button 
+                              onClick={() => setShowTopupModal(true)}
+                              variant="link" 
+                              className="p-0 ml-2 h-auto"
+                            >
+                              Top up now
+                            </Button>
+                          </AlertDescription>
+                          </div>
                       </Alert>
                     ) : (
                       <form onSubmit={handleSubmit(onInstallSubmit)} className="space-y-6">
@@ -1333,6 +1542,257 @@ export default function UserDashboardPage() {
                         {renderPagination(topupHistoryPage, topupHistory.length, setTopupHistoryPage)}
                       </>
                     )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Settings Tab */}
+            {activeTab === 'settings' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-foreground mb-2">Settings</h2>
+                  <p className="text-xs md:text-sm text-muted-foreground">Manage your account settings and preferences</p>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Update Password Card */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Shield className="h-5 w-5" />
+                        Update Password
+                      </CardTitle>
+                      <CardDescription>
+                        Change your account password for security
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <form onSubmit={handleUpdatePassword} className="space-y-4">
+                        <div>
+                          <Label htmlFor="currentPassword">Current Password</Label>
+                          <Input
+                            id="currentPassword"
+                            type="password"
+                            value={passwordForm.currentPassword}
+                            onChange={(e) => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                            placeholder="Enter your current password"
+                            required
+                          />
+                        </div>
+                        
+                        <div>
+                          <Label htmlFor="newPassword">New Password</Label>
+                          <Input
+                            id="newPassword"
+                            type="password"
+                            value={passwordForm.newPassword}
+                            onChange={(e) => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                            placeholder="Enter new password"
+                            required
+                            minLength={6}
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Password must be at least 6 characters long
+                          </p>
+                        </div>
+                        
+                        <div>
+                          <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                          <Input
+                            id="confirmPassword"
+                            type="password"
+                            value={passwordForm.confirmPassword}
+                            onChange={(e) => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                            placeholder="Confirm your new password"
+                            required
+                          />
+                        </div>
+                        
+                        <Button
+                          type="submit"
+                          className="w-full"
+                          disabled={isUpdatingPassword || !passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword}
+                        >
+                          {isUpdatingPassword ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Updating Password...
+                            </>
+                          ) : (
+                            <>
+                              <Shield className="mr-2 h-4 w-4" />
+                              Update Password
+                            </>
+                          )}
+                        </Button>
+                      </form>
+                    </CardContent>
+                  </Card>
+
+                  {/* Telegram Connection Card */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Bell className="h-5 w-5" />
+                        Telegram Connection
+                      </CardTitle>
+                      <CardDescription>
+                        Connect your Telegram account to receive notifications
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {user.telegram ? (
+                        <div className="space-y-4">
+                        <div className="flex items-center justify-between p-4 border rounded-lg bg-green-50 dark:bg-green-950/20">
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 bg-green-500/10 rounded-full flex items-center justify-center">
+                              <CheckCircle className="h-5 w-5 text-green-600" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-green-900 dark:text-green-100">Telegram Connected</p>
+                              <p className="text-sm text-green-600 dark:text-green-300">
+                                {user.telegram_display_name ? (
+                                  <>
+                                    {user.telegram_display_name} {user.telegram && `(@${user.telegram})`}
+                                  </>
+                                ) : (
+                                  `@${user.telegram}`
+                                )}
+                              </p>
+                              {user.telegram_user_id && (
+                                <p className="text-xs text-green-500 dark:text-green-400">
+                                  ID: {user.telegram_user_id}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Telegram Notifications Toggle */}
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <Label htmlFor="telegram-notifications" className="text-sm font-medium">
+                              Installation Notifications
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              Get notified about installation status updates via Telegram
+                            </p>
+                          </div>
+                          <Button
+                            variant={telegramNotifications ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => handleToggleTelegramNotifications(!telegramNotifications)}
+                            className="ml-4"
+                          >
+                            {telegramNotifications ? "On" : "Off"}
+                          </Button>
+                        </div>
+                        
+                        <Button
+                          variant="outline"
+                          onClick={handleDisconnectTelegram}
+                          className="w-full"
+                        >
+                          <X className="mr-2 h-4 w-4" />
+                          Disconnect Telegram
+                        </Button>
+                      </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="text-center py-6">
+                            <Bell className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                            <p className="text-muted-foreground mb-2">No Telegram account connected</p>
+                            <p className="text-sm text-muted-foreground">
+                              Connect your Telegram account to receive real-time notifications about your Windows installations
+                            </p>
+                          </div>
+                          
+                          <Button
+                            onClick={handleConnectTelegram}
+                            disabled={isConnectingTelegram}
+                            className="w-full"
+                          >
+                            {isConnectingTelegram ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Connecting...
+                              </>
+                            ) : (
+                              <>
+                                <Bell className="mr-2 h-4 w-4" />
+                                Connect Telegram
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Profile Information Card */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <User className="h-5 w-5" />
+                      Profile Information
+                    </CardTitle>
+                    <CardDescription>
+                      Your account details and information
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <Label>Username</Label>
+                        <div className="flex items-center gap-3 mt-1">
+                          <Avatar className="h-8 w-8">
+                            <AvatarImage src={user.profile?.avatar_url} />
+                            <AvatarFallback>
+                              {user.username.slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="font-medium">{user.username}</span>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <Label>Email Address</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="font-medium">{user.email}</span>
+                          <Badge variant={user.is_verified ? "default" : "destructive"}>
+                            {user.is_verified ? "Verified" : "Unverified"}
+                          </Badge>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <Label>Current Quota</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge variant="outline" className="text-lg px-3 py-1">
+                            {dashboardData.stats.quota || 0}
+                          </Badge>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setShowTopupModal(true)}
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Topup
+                          </Button>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <Label>Account Type</Label>
+                        <div className="mt-1">
+                          <Badge variant={user.admin === 1 ? "default" : "secondary"}>
+                            {user.admin === 1 ? "Administrator" : "User"}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               </div>

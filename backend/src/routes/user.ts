@@ -33,7 +33,7 @@ router.get('/notifications/stream',
     // Handle authentication for EventSource (which can't send custom headers)
     const authHeader = req.headers.authorization;
     const tokenFromHeader = authHeader && authHeader.split(' ')[1];
-    const tokenFromQuery = req.query.token as string;
+    const tokenFromQuery = req.query['token'] as string;
     const token = tokenFromHeader || tokenFromQuery;
     
     if (!token) {
@@ -194,7 +194,7 @@ router.get('/profile',
     
     // Use parameterized query to prevent SQL injection
     const user = await db.get(`
-      SELECT u.id, u.username, u.email, u.is_verified, u.admin, u.telegram, u.quota, u.created_at, u.last_login,
+      SELECT u.id, u.username, u.email, u.is_verified, u.admin, u.telegram, u.telegram_user_id, u.telegram_display_name, u.telegram_notifications, u.quota, u.created_at, u.last_login,
              p.first_name, p.last_name, p.phone, p.avatar_url, p.timezone, p.language, p.created_at as profile_created_at
       FROM users u
       LEFT JOIN user_profiles p ON u.id = p.user_id
@@ -226,6 +226,9 @@ router.get('/profile',
       is_verified: user.is_verified,
       admin: user.admin,
       telegram: user.telegram,
+      telegram_user_id: user.telegram_user_id,
+      telegram_display_name: user.telegram_display_name,
+      telegram_notifications: user.telegram_notifications,
       quota: user.quota,
       created_at: user.created_at,
       last_login: user.last_login,
@@ -390,7 +393,7 @@ router.put('/profile',
 
     // Get updated user data
     const user = await db.get(`
-      SELECT u.id, u.username, u.email, u.is_verified, u.admin, u.telegram, u.quota, u.created_at, u.last_login,
+      SELECT u.id, u.username, u.email, u.is_verified, u.admin, u.telegram, u.telegram_user_id, u.telegram_display_name, u.telegram_notifications, u.quota, u.created_at, u.last_login,
              p.first_name, p.last_name, p.phone, p.avatar_url, p.timezone, p.language, p.created_at as profile_created_at
       FROM users u
       LEFT JOIN user_profiles p ON u.id = p.user_id
@@ -415,6 +418,9 @@ router.put('/profile',
       is_verified: user.is_verified,
       admin: user.admin,
       telegram: user.telegram,
+      telegram_user_id: user.telegram_user_id,
+      telegram_display_name: user.telegram_display_name,
+      telegram_notifications: user.telegram_notifications,
       quota: user.quota,
       created_at: user.created_at,
       last_login: user.last_login,
@@ -447,7 +453,7 @@ router.get('/dashboard',
     
     // Get user data
     const user = await db.get(`
-      SELECT u.id, u.username, u.email, u.is_verified, u.admin, u.telegram, u.quota, u.created_at, u.last_login,
+      SELECT u.id, u.username, u.email, u.is_verified, u.admin, u.telegram, u.telegram_user_id, u.telegram_display_name, u.telegram_notifications, u.quota, u.created_at, u.last_login,
              p.first_name, p.last_name, p.phone, p.avatar_url, p.timezone, p.language, p.created_at as profile_created_at
       FROM users u
       LEFT JOIN user_profiles p ON u.id = p.user_id
@@ -492,6 +498,9 @@ router.get('/dashboard',
       is_verified: user.is_verified,
       admin: user.admin,
       telegram: user.telegram,
+      telegram_user_id: user.telegram_user_id,
+      telegram_display_name: user.telegram_display_name,
+      telegram_notifications: user.telegram_notifications,
       quota: user.quota,
       created_at: user.created_at,
       last_login: user.last_login,
@@ -710,10 +719,10 @@ router.post('/topup',
           name: product ? product.name : 'Quota Install',
           price: Math.round(finalAmount),
           quantity: 1,
-          product_url: process.env.FRONTEND_URL || 'https://localhost:3000',
+          product_url: process.env['FRONTEND_URL'] || 'https://localhost:3000',
           image_url: product ? product.image_url : 'https://localhost/quota-install.jpg'
         }],
-        return_url: `${process.env.FRONTEND_URL || 'https://localhost:3000'}/dashboard?payment=success`,
+        return_url: `${process.env['FRONTEND_URL'] || 'https://localhost:3000'}/dashboard?payment=success`,
         expired_time: expiry
       };
 
@@ -865,6 +874,193 @@ router.post('/topup/calculate',
         discount_amount: discountAmount,
         final_amount: finalAmount
       }
+    } as ApiResponse);
+  })
+);
+
+// Update user password
+const updatePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(6, 'New password must be at least 6 characters')
+});
+
+router.post('/update-password',
+  authenticateToken,
+  requireVerifiedUser,
+  validateRequest(updatePasswordSchema),
+  auditLogger('UPDATE_PASSWORD'),
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+
+    const { currentPassword, newPassword } = req.body;
+    const db = getDatabase();
+    
+    // Get current user data including password hash
+    const user = await db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    if (!user) {
+      throw new NotFoundError('User not found');
+    }
+
+    // Verify current password
+    const { AuthUtils } = await import('../utils/auth.js');
+    const isCurrentPasswordValid = await AuthUtils.comparePassword(currentPassword, user.password_hash);
+    
+    if (!isCurrentPasswordValid) {
+      res.status(400).json({
+        success: false,
+        message: 'Current password is incorrect',
+        error: 'INVALID_CURRENT_PASSWORD'
+      } as ApiResponse);
+      return;
+    }
+
+    // Hash new password
+    const newPasswordHash = await AuthUtils.hashPassword(newPassword);
+    
+    // Update password in database
+    await db.run(
+      'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?',
+      [newPasswordHash, DateUtils.nowSQLite(), req.user.id]
+    );
+
+    logger.info('User password updated:', {
+      userId: req.user.id,
+      username: req.user.username
+    });
+
+    res.json({
+      success: true,
+      message: 'Password updated successfully'
+    } as ApiResponse);
+  })
+);
+
+// Connect Telegram account
+router.post('/connect-telegram',
+  authenticateToken,
+  requireVerifiedUser,
+  auditLogger('CONNECT_TELEGRAM'),
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+
+    try {
+      // Import TelegramService
+      const { TelegramService } = await import('../services/telegramService.js');
+      
+      // Generate connection token and bot link
+      const connectionData = await TelegramService.generateConnectionToken(req.user.id);
+      
+      logger.info('Telegram connection initiated:', {
+        userId: req.user.id,
+        username: req.user.username
+      });
+
+      res.json({
+        success: true,
+        message: 'Telegram connection link generated successfully',
+        data: {
+          telegramBotUrl: connectionData.link,
+          instructions: 'Click the link to open Telegram and connect your account. The connection link expires in 10 minutes.',
+          expiresInMinutes: 10
+        }
+      } as ApiResponse);
+    } catch (error: any) {
+      logger.error('Error generating Telegram connection:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to generate Telegram connection',
+        error: error.message
+      } as ApiResponse);
+    }
+  })
+);
+
+// Update Telegram notification settings
+const telegramNotificationsSchema = z.object({
+  enabled: z.boolean()
+});
+
+router.post('/telegram-notifications',
+  authenticateToken,
+  requireVerifiedUser,
+  validateRequest(telegramNotificationsSchema),
+  auditLogger('UPDATE_TELEGRAM_NOTIFICATIONS'),
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+
+    const { enabled } = req.body;
+    const db = getDatabase();
+    
+    // Check if user has Telegram connected
+    const user = await db.get('SELECT telegram FROM users WHERE id = ?', [req.user.id]);
+    if (!user || !user.telegram) {
+      res.status(400).json({
+        success: false,
+        message: 'Telegram account not connected',
+        error: 'TELEGRAM_NOT_CONNECTED'
+      } as ApiResponse);
+      return;
+    }
+
+    // Update notification preference
+    await db.run(
+      'UPDATE users SET telegram_notifications = ?, updated_at = ? WHERE id = ?',
+      [enabled ? 1 : 0, DateUtils.nowSQLite(), req.user.id]
+    );
+
+    logger.info('Telegram notifications updated:', {
+      userId: req.user.id,
+      username: req.user.username,
+      enabled
+    });
+
+    res.json({
+      success: true,
+      message: `Telegram notifications ${enabled ? 'enabled' : 'disabled'} successfully`
+    } as ApiResponse);
+  })
+);
+
+// Disconnect Telegram account
+router.post('/disconnect-telegram',
+  authenticateToken,
+  requireVerifiedUser,
+  auditLogger('DISCONNECT_TELEGRAM'),
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+
+    const db = getDatabase();
+    
+    // Clear Telegram information from user account
+    await db.run(`
+      UPDATE users
+      SET telegram = NULL, telegram_user_id = NULL, telegram_display_name = NULL,
+          telegram_notifications = 0, updated_at = ?
+      WHERE id = ?
+    `, [DateUtils.nowSQLite(), req.user.id]);
+
+    // Clean up any unused connection tokens for this user
+    await db.run(
+      'DELETE FROM telegram_connection_tokens WHERE user_id = ?',
+      [req.user.id]
+    );
+
+    logger.info('Telegram account disconnected:', {
+      userId: req.user.id,
+      username: req.user.username
+    });
+
+    res.json({
+      success: true,
+      message: 'Telegram account disconnected successfully'
     } as ApiResponse);
   })
 );
@@ -1045,6 +1241,120 @@ router.post('/test-dashboard-refresh',
       success: true,
       message: 'Dashboard refresh test notification sent successfully',
       data: testNotification
+    } as ApiResponse);
+  })
+);
+
+// Debug: Check notification stream connections
+router.get('/debug/connections',
+  authenticateToken,
+  requireVerifiedUser,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+    
+    const { NotificationService } = await import('../services/notificationService.js');
+    
+    const connectionsInfo = NotificationService.getConnectionDebugInfo(req.user.id);
+    
+    res.json({
+      success: true,
+      message: 'Connection debug info retrieved',
+      data: connectionsInfo
+    } as ApiResponse);
+  })
+);
+
+// Debug: Get all connections info (admin-like view)
+router.get('/debug/all-connections',
+  authenticateToken,
+  requireVerifiedUser,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+    
+    const { NotificationService } = await import('../services/notificationService.js');
+    
+    const allConnectionsInfo = NotificationService.getConnectionDebugInfo();
+    
+    res.json({
+      success: true,
+      message: 'All connections debug info retrieved',
+      data: allConnectionsInfo
+    } as ApiResponse);
+  })
+);
+
+// Debug: Test notification delivery
+router.post('/debug/test-delivery',
+  authenticateToken,
+  requireVerifiedUser,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+    
+    const { NotificationService } = await import('../services/notificationService.js');
+    
+    const deliveryResult = await NotificationService.testNotificationDelivery(req.user.id);
+    const connectionInfo = NotificationService.getConnectionDebugInfo(req.user.id);
+    
+    res.json({
+      success: true,
+      message: 'Notification delivery test completed',
+      data: {
+        deliverySuccessful: deliveryResult,
+        connectionInfo,
+        timestamp: new Date().toISOString()
+      }
+    } as ApiResponse);
+  })
+);
+
+// Debug: Send test notification with detailed logging
+router.post('/debug/test-stream-notification',
+  authenticateToken,
+  requireVerifiedUser,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new NotFoundError('User not found');
+    }
+
+    const { status = 'completed', message = 'Test stream notification' } = req.body;
+    
+    logger.info('🧪 Sending debug stream notification:', {
+      userId: req.user.id,
+      status,
+      timestamp: new Date().toISOString()
+    });
+    
+    const testNotification = {
+      type: 'install_status_update',
+      status,
+      message: `DEBUG: ${message}`,
+      timestamp: DateUtils.nowISO(),
+      ip: '192.168.1.100',
+      installId: 999,
+      winVersion: 'Windows 11 Pro'
+    };
+    
+    const { NotificationService } = await import('../services/notificationService.js');
+    
+    // Send notification and log the result
+    logger.info('🔔 About to send real-time notification:', testNotification);
+    NotificationService.sendRealTimeNotification(req.user.id, testNotification);
+    logger.info('✅ Real-time notification sent successfully');
+    
+    res.json({
+      success: true,
+      message: 'Debug stream notification sent',
+      data: {
+        notification: testNotification,
+        userId: req.user.id,
+        timestamp: new Date().toISOString()
+      }
     } as ApiResponse);
   })
 );

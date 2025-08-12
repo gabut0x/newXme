@@ -15,6 +15,10 @@ export interface User {
   is_verified: boolean;
   admin?: number;
   telegram?: string;
+  telegram_user_id?: number;
+  telegram_display_name?: string;
+  telegram_notifications?: boolean;
+  quota?: number;
   created_at: string;
   last_login?: string;
   profile?: UserProfile;
@@ -85,6 +89,20 @@ export interface ResetPasswordRequest {
   token: string;
   newPassword: string;
   confirmPassword: string;
+}
+
+export interface UpdatePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface ConnectTelegramResponse {
+  telegramBotUrl: string;
+  instructions: string;
+}
+
+export interface UpdateTelegramNotificationsRequest {
+  enabled: boolean;
 }
 
 export interface VerifyEmailRequest {
@@ -346,6 +364,38 @@ class ApiService {
 
   async deleteAccount(): Promise<AxiosResponse<ApiResponse>> {
     return this.api.delete('/user/account');
+  }
+
+  async updatePassword(data: UpdatePasswordRequest): Promise<AxiosResponse<ApiResponse>> {
+    return this.api.post('/user/update-password', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+
+  async connectTelegram(): Promise<AxiosResponse<ApiResponse<ConnectTelegramResponse>>> {
+    return this.api.post('/user/connect-telegram', {}, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+
+  async updateTelegramNotifications(data: UpdateTelegramNotificationsRequest): Promise<AxiosResponse<ApiResponse>> {
+    return this.api.post('/user/telegram-notifications', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+
+  async disconnectTelegram(): Promise<AxiosResponse<ApiResponse>> {
+    return this.api.post('/user/disconnect-telegram', {}, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   // User install endpoints

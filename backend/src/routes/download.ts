@@ -14,13 +14,13 @@ const router = express.Router();
 
 // Base URLs for different regions
 const BASE_URLS = {
-  'asia': process.env.ASIA_BASE_URL || 'https://asia-files.example.com',
-  'australia': process.env.AUSTRALIA_BASE_URL || 'https://au-files.example.com',
-  'global': process.env.GLOBAL_BASE_URL || 'https://global-files.example.com'
+  'asia': process.env['ASIA_BASE_URL'] || 'https://asia-files.example.com',
+  'australia': process.env['AUSTRALIA_BASE_URL'] || 'https://au-files.example.com',
+  'global': process.env['GLOBAL_BASE_URL'] || 'https://global-files.example.com'
 };
 
 // Allowed user agents
-const ALLOWED_USER_AGENTS = ['wget', 'curl', 'python-requests'];
+const ALLOWED_USER_AGENTS = ['wget', 'curl'];
 
 // Blocked user agents pattern
 const BLOCKED_USER_AGENTS_PATTERN = /bot|crawler|spider|scraper|facebook|twitter|linkedin/i;
@@ -32,13 +32,19 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbG
   async (req: Request, res: Response) => {
     try {
       const { region, filename } = req.params;
-      const signature = req.query.sig as string;
+      const signature = req.query['sig'] as string;
       const userAgent = req.headers['user-agent'] || '';
-      const ip = req.headers['cf-connecting-ip'] as string || 
-                 req.headers['x-forwarded-for'] as string || 
-                 req.ip || 
-                 req.connection?.remoteAddress || 
+      const ip = req.headers['cf-connecting-ip'] as string ||
+                 req.headers['x-forwarded-for'] as string ||
+                 req.ip ||
+                 req.connection?.remoteAddress ||
                  'unknown';
+
+      // Validate required parameters
+      if (!region || !filename || !signature) {
+        logger.warn('Missing required parameters:', { region, filename, signature: !!signature, ip });
+        return res.status(400).send('Missing required parameters');
+      }
 
       // Validate User-Agent
       if (BLOCKED_USER_AGENTS_PATTERN.test(userAgent)) {
@@ -52,7 +58,7 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbG
       }
 
       // Validate signature
-      if (!signature || !InstallService.validateSignature(ip, filename, signature)) {
+      if (!InstallService.validateSignature(ip, filename, signature)) {
         logger.warn('Invalid signature:', { ip, filename, signature });
         return res.status(403).send('Access denied');
       }
@@ -69,9 +75,6 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbG
         return res.status(404).send('Region not supported');
       }
 
-      // Log download access and handle installation progress
-      await InstallService.handleDownloadAccess(ip, filename, userAgent, region);
-
       // Write to log file
       const logDir = path.join(__dirname, '../../logs');
       await fs.mkdir(logDir, { recursive: true });
@@ -84,6 +87,9 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbG
       } catch (logError) {
         logger.error('Failed to write download log:', logError);
       }
+
+      // Log download access and handle installation progress
+      await InstallService.handleDownloadAccess(ip, filename, userAgent, region);
 
       // Redirect to actual file
       const fileUrl = `${BASE_URLS[region as keyof typeof BASE_URLS]}/${filename}`;
@@ -115,42 +121,5 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbG
     }
   }
 );
-
-/**
- * Check if IP is currently being processed (optional endpoint)
- */
-router.get('/check', async (req: Request, res: Response) => {
-  try {
-    const { ip } = req.query;
-    
-    if (!ip || typeof ip !== 'string') {
-      return res.status(400).json({
-        success: false,
-        message: 'IP parameter required'
-      });
-    }
-
-    // Check if there's an active installation for this IP
-    const db = getDatabase();
-    const activeInstall = await db.get(
-      'SELECT id, status FROM install_data WHERE ip = ? AND status IN (?, ?) ORDER BY created_at DESC LIMIT 1',
-      [ip, 'pending', 'running']
-    );
-
-    res.json({
-      success: true,
-      active: !!activeInstall,
-      status: activeInstall?.status || null,
-      installId: activeInstall?.id || null
-    });
-
-  } catch (error: any) {
-    logger.error('IP check error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-});
 
 export { router as downloadRoutes };

@@ -24,6 +24,9 @@ export interface InstallStatusUpdate {
 // In-memory storage for real-time notifications (in production, use Redis or WebSocket)
 const activeConnections = new Map<number, any[]>(); // userId -> array of notification callbacks
 
+// Debug tracking
+const connectionStats = new Map<number, { count: number; lastActivity: string; lastNotification?: any }>();
+
 export class NotificationService {
   /**
    * Register user for real-time notifications (dashboard connection)
@@ -36,7 +39,17 @@ export class NotificationService {
     const userCallbacks = activeConnections.get(userId)!;
     userCallbacks.push(callback);
     
-    logger.info('User registered for real-time notifications:', { userId });
+    // Update connection stats
+    connectionStats.set(userId, {
+      count: userCallbacks.length,
+      lastActivity: new Date().toISOString()
+    });
+    
+    logger.info('🔗 User registered for real-time notifications:', {
+      userId,
+      totalConnections: userCallbacks.length,
+      timestamp: new Date().toISOString()
+    });
     
     // Return unregister function
     return () => {
@@ -48,9 +61,19 @@ export class NotificationService {
         }
         if (callbacks.length === 0) {
           activeConnections.delete(userId);
+          connectionStats.delete(userId);
+        } else {
+          // Update connection stats
+          connectionStats.set(userId, {
+            count: callbacks.length,
+            lastActivity: new Date().toISOString()
+          });
         }
       }
-      logger.info('User unregistered from real-time notifications:', { userId });
+      logger.info('🔌 User unregistered from real-time notifications:', {
+        userId,
+        remainingConnections: callbacks?.length || 0
+      });
     };
   }
 
@@ -59,32 +82,72 @@ export class NotificationService {
    */
   static sendRealTimeNotification(userId: number, notification: any): void {
     const userCallbacks = activeConnections.get(userId);
+    
+    logger.info('🚀 Attempting to send real-time notification:', {
+      userId,
+      notificationType: notification.type,
+      hasActiveConnections: !!userCallbacks,
+      connectionCount: userCallbacks?.length || 0,
+      notification: {
+        type: notification.type,
+        status: notification.status,
+        message: notification.message
+      }
+    });
+    
     if (userCallbacks && userCallbacks.length > 0) {
-      userCallbacks.forEach(callback => {
+      let successfulCallbacks = 0;
+      let failedCallbacks = 0;
+      
+      userCallbacks.forEach((callback, index) => {
         try {
-          logger.info('Sending notification to callback:', {
+          logger.info(`📡 Sending notification to callback ${index + 1}/${userCallbacks.length}:`, {
             userId,
-            notification
+            callbackIndex: index
           });
+          
           callback(notification);
+          successfulCallbacks++;
+          
+          logger.info(`✅ Callback ${index + 1} executed successfully`);
         } catch (error) {
-          logger.error('Error sending real-time notification:', error);
+          failedCallbacks++;
+          logger.error(`❌ Error in callback ${index + 1}:`, error);
         }
       });
       
-      logger.info('Real-time notification sent to user:', {
+      // Update connection stats
+      const stats = connectionStats.get(userId);
+      if (stats) {
+        stats.lastNotification = {
+          type: notification.type,
+          timestamp: new Date().toISOString(),
+          successfulCallbacks,
+          failedCallbacks
+        };
+        stats.lastActivity = new Date().toISOString();
+        connectionStats.set(userId, stats);
+      }
+      
+      logger.info('🎯 Real-time notification delivery complete:', {
         userId,
         notificationType: notification.type,
-        activeConnections: userCallbacks.length,
-        notification
+        totalCallbacks: userCallbacks.length,
+        successfulCallbacks,
+        failedCallbacks,
+        deliveryTime: new Date().toISOString()
       });
     } else {
-      logger.warn('No active connections for user:', { userId });
+      logger.warn('⚠️  No active connections for user:', {
+        userId,
+        totalActiveUsers: activeConnections.size,
+        allActiveUserIds: Array.from(activeConnections.keys())
+      });
     }
   }
 
   /**
-   * Notify installation status update (real-time to dashboard)
+   * Notify installation status update (real-time to dashboard + Telegram if enabled)
    */
   static async notifyInstallStatusUpdate(update: InstallStatusUpdate): Promise<void> {
     const notification = {
@@ -100,13 +163,41 @@ export class NotificationService {
     // Send real-time notification to dashboard
     this.sendRealTimeNotification(update.userId, notification);
 
-    logger.info('Install status update notification sent:', {
-      userId: update.userId,
-      installId: update.installId,
-      status: update.status,
-      message: update.message,
-      timestamp: update.timestamp
-    });
+    // Send Telegram notification if user has enabled it
+    try {
+      const { TelegramService } = await import('./telegramService.js');
+      const telegramSent = await TelegramService.sendInstallationNotification(update.userId, {
+        status: update.status,
+        ip: update.ip || 'Unknown',
+        winVersion: update.winVersion || 'Unknown',
+        message: update.message
+      });
+
+      logger.info('Install status update notification sent:', {
+        userId: update.userId,
+        installId: update.installId,
+        status: update.status,
+        message: update.message,
+        timestamp: update.timestamp,
+        telegramSent: telegramSent
+      });
+    } catch (error) {
+      logger.error('Failed to send Telegram notification for install status update:', {
+        userId: update.userId,
+        installId: update.installId,
+        error: error instanceof Error ? error.message : error
+      });
+      
+      // Still log the dashboard notification as successful
+      logger.info('Install status update notification sent to dashboard only:', {
+        userId: update.userId,
+        installId: update.installId,
+        status: update.status,
+        message: update.message,
+        timestamp: update.timestamp,
+        telegramError: true
+      });
+    }
   }
 
   /**
@@ -593,5 +684,69 @@ The XME Projects Team
         addedAt: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       }
     });
+  }
+
+  /**
+   * Get connection debug information
+   */
+  static getConnectionDebugInfo(userId?: number): any {
+    if (userId) {
+      const userCallbacks = activeConnections.get(userId);
+      const stats = connectionStats.get(userId);
+      
+      return {
+        userId,
+        hasActiveConnections: !!userCallbacks,
+        connectionCount: userCallbacks?.length || 0,
+        stats: stats || null,
+        isRegistered: activeConnections.has(userId)
+      };
+    }
+    
+    // Return all connections info
+    const allConnections: any[] = [];
+    for (const [uid, callbacks] of activeConnections) {
+      const stats = connectionStats.get(uid);
+      allConnections.push({
+        userId: uid,
+        connectionCount: callbacks.length,
+        stats: stats || null
+      });
+    }
+    
+    return {
+      totalActiveUsers: activeConnections.size,
+      connections: allConnections,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  /**
+   * Test notification delivery for debugging
+   */
+  static async testNotificationDelivery(userId: number): Promise<boolean> {
+    logger.info('🧪 Testing notification delivery for user:', { userId });
+    
+    const testNotification = {
+      type: 'test',
+      message: 'Test notification delivery',
+      timestamp: new Date().toISOString(),
+      testId: Math.random().toString(36).substring(7)
+    };
+    
+    this.sendRealTimeNotification(userId, testNotification);
+    
+    // Check if delivery was recorded
+    const stats = connectionStats.get(userId);
+    const wasDelivered = stats?.lastNotification?.timestamp === testNotification.timestamp;
+    
+    logger.info('🧪 Test notification delivery result:', {
+      userId,
+      wasDelivered,
+      testId: testNotification.testId,
+      stats
+    });
+    
+    return wasDelivered;
   }
 }

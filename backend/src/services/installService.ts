@@ -28,20 +28,13 @@ export interface OSInfo {
   version: string;
 }
 
-export interface InstallProgress {
-  step: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  message: string;
-  timestamp: string;
-}
-
 export class InstallService {
   private static readonly SUPPORTED_OS = {
     'Ubuntu': ['20', '22'],
     'Debian GNU/Linux': ['12']
   };
 
-  private static readonly TRACK_SERVER = process.env['TRACK_SERVER'] || 'http://localhost:3001';
+  private static readonly TRACK_SERVER = process.env['TRACK_SERVER'] || 'https://b3f5795ff818.ngrok-free.app';
 
   /**
    * Main installation process with comprehensive validation
@@ -477,7 +470,7 @@ export class InstallService {
       const command = this.buildExecutionCommand(obfuscatedScript);
 
       // Execute the command
-      // await this.executeRemoteCommand(client, command, userId, installId);
+      await this.executeRemoteCommand(client, command, userId, installId);
 
       // Log successful execution
       DatabaseSecurity.logDatabaseOperation('EXECUTE_INSTALL_SCRIPT', 'install_data', userId, {
@@ -761,31 +754,22 @@ export class InstallService {
           // Installation hasn't started running - there's a problem
           await this.updateInstallStatus(installId, 'failed', 'Installation failed to start within expected time');
           
-          // Refund quota
-          // const db = getDatabase();
-          // await db.run(
-          //   'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
-          //   [DateUtils.nowSQLite(), userId]
-          // );
-          
-          // Failure notification already sent via updateInstallStatus above
-          
-          logger.warn('Installation failed to start within 2 minutes:', {
+          logger.warn('Installation failed to start within 3 minutes:', {
             installId,
             userId,
             ip
           });
         }
       } catch (error: any) {
-        logger.error('Installation monitoring (3min check) failed:', {
+        logger.error('Installation monitoring (2 min check) failed:', {
           installId,
           userId,
           error: error.message
         });
       }
-    }, 1 * 60 * 1000); // 1 minutes
+    }, 3 * 60 * 1000); // 3 minutes
 
-    // Check if installation completes within 10 minutes (if status is running)
+    // Check if installation completes within 6 minutes (if status is running)
     setTimeout(async () => {
       try {
         const install = await this.getInstallById(installId);
@@ -810,9 +794,9 @@ export class InstallService {
           error: error.message
         });
       }
-    }, 10 * 60 * 1000); // 10 minutes
+    }, 4 * 60 * 1000); // 4 minutes
 
-    // Final check after 20 minutes - mark as needs manual review if still running
+    // Final check after 15 minutes - mark as needs manual review if still running
     setTimeout(async () => {
       try {
         const install = await this.getInstallById(installId);
@@ -824,7 +808,7 @@ export class InstallService {
             installId,
             userId,
             ip,
-            duration: '20+ minutes'
+            duration: '15+ minutes'
           });
         }
       } catch (error: any) {
@@ -834,7 +818,168 @@ export class InstallService {
           error: error.message
         });
       }
-    }, 20 * 60 * 1000); // 20 minutes
+    }, 15 * 60 * 1000); // 15 minutes
+  }
+/**
+   * Resume installation monitoring after server restart
+   * This should be called during server startup
+   */
+  static async resumeInstallationMonitoring(): Promise<void> {
+    try {
+      logger.info('Resuming installation monitoring after server restart...');
+      
+      const activeInstalls = await this.getAllActiveInstalls();
+      logger.info(`Found ${activeInstalls.length} active installations to resume monitoring`);
+      
+      for (const install of activeInstalls) {
+        const createdTime = new Date(install.created_at).getTime();
+        const updatedTime = new Date(install.updated_at).getTime();
+        const now = Date.now();
+        const minutesSinceCreated = Math.floor((now - createdTime) / (60 * 1000));
+        const minutesSinceUpdated = Math.floor((now - updatedTime) / (60 * 1000));
+        
+        logger.info(`Resuming monitoring for install ${install.id}:`, {
+          installId: install.id,
+          userId: install.user_id,
+          ip: install.ip,
+          status: install.status,
+          minutesSinceCreated,
+          minutesSinceUpdated
+        });
+        
+        // Resume monitoring based on current status and elapsed time
+        if (install.status === 'pending') {
+          // If pending for more than 3 minutes, mark as failed
+          if (minutesSinceCreated >= 3) {
+            await this.updateInstallStatus(install.id, 'failed', 'Installation failed to start within expected time (detected during server restart recovery)');
+            logger.info(`Marked install ${install.id} as failed (pending > 3 minutes)`);
+          } else {
+            // Resume monitoring with adjusted timeout
+            const remainingTime = (3 * 60 * 1000) - (now - createdTime);
+            this.scheduleFailureCheck(install.id, install.user_id, install.ip, remainingTime);
+          }
+        } else if (install.status === 'running') {
+          // Check based on how long it's been running
+          if (minutesSinceUpdated >= 15) {
+            // Running for more than 15 minutes, mark for manual review
+            await this.updateInstallStatus(install.id, 'manual_review', 'Installation taking longer than expected - requires manual verification (detected during server restart recovery)');
+            logger.info(`Marked install ${install.id} for manual review (running > 15 minutes)`);
+          } else if (minutesSinceUpdated >= 4) {
+            // Running for more than 4 minutes, check Windows RDP
+            const isWindowsReady = await this.checkWindowsRDP(install.ip);
+            if (isWindowsReady) {
+              await this.updateInstallStatus(install.id, 'completed', 'Windows installation completed successfully (detected during server restart recovery)');
+              logger.info(`Marked install ${install.id} as completed (Windows RDP accessible)`);
+            } else {
+              // Schedule final check
+              const remainingTime = (15 * 60 * 1000) - (now - updatedTime);
+              this.scheduleManualReviewCheck(install.id, install.user_id, install.ip, remainingTime);
+            }
+          } else {
+            // Still within normal running time, schedule appropriate checks
+            const completionCheckTime = (4 * 60 * 1000) - (now - updatedTime);
+            const manualReviewCheckTime = (15 * 60 * 1000) - (now - updatedTime);
+            
+            if (completionCheckTime > 0) {
+              this.scheduleCompletionCheck(install.id, install.user_id, install.ip, completionCheckTime);
+            }
+            if (manualReviewCheckTime > 0) {
+              this.scheduleManualReviewCheck(install.id, install.user_id, install.ip, manualReviewCheckTime);
+            }
+          }
+        }
+        // Note: 'manual_review' status doesn't need active monitoring
+      }
+      
+      logger.info('Installation monitoring resume completed');
+    } catch (error: any) {
+      logger.error('Failed to resume installation monitoring:', error);
+    }
+  }
+
+  /**
+   * Get all active installations (pending, running, manual_review)
+   */
+  private static async getAllActiveInstalls(): Promise<any[]> {
+    try {
+      const db = getDatabase();
+      const installs = await db.all(
+        'SELECT * FROM install_data WHERE status IN (?, ?, ?) ORDER BY created_at ASC',
+        ['pending', 'running', 'manual_review']
+      );
+      
+      return installs || [];
+    } catch (error: any) {
+      logger.error('Failed to get all active installs:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Schedule failure check for pending installations
+   */
+  private static scheduleFailureCheck(installId: number, userId: number, ip: string, delay: number): void {
+    if (delay <= 0) return;
+    
+    setTimeout(async () => {
+      try {
+        const install = await this.getInstallById(installId);
+        if (install && install.status === 'pending') {
+          await this.updateInstallStatus(installId, 'failed', 'Installation failed to start within expected time');
+          logger.warn('Installation failed to start within 3 minutes:', { installId, userId, ip });
+        }
+      } catch (error: any) {
+        logger.error('Scheduled failure check failed:', { installId, userId, error: error.message });
+      }
+    }, delay);
+    
+    logger.info(`Scheduled failure check for install ${installId} in ${Math.round(delay / 1000)}s`);
+  }
+
+  /**
+   * Schedule completion check for running installations
+   */
+  private static scheduleCompletionCheck(installId: number, userId: number, ip: string, delay: number): void {
+    if (delay <= 0) return;
+    
+    setTimeout(async () => {
+      try {
+        const install = await this.getInstallById(installId);
+        if (install && install.status === 'running') {
+          const isWindowsReady = await this.checkWindowsRDP(ip);
+          if (isWindowsReady) {
+            await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
+          } else {
+            await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but Windows RDP not accessible - requires manual verification');
+          }
+        }
+      } catch (error: any) {
+        logger.error('Scheduled completion check failed:', { installId, userId, error: error.message });
+      }
+    }, delay);
+    
+    logger.info(`Scheduled completion check for install ${installId} in ${Math.round(delay / 1000)}s`);
+  }
+
+  /**
+   * Schedule manual review check for long-running installations
+   */
+  private static scheduleManualReviewCheck(installId: number, userId: number, ip: string, delay: number): void {
+    if (delay <= 0) return;
+    
+    setTimeout(async () => {
+      try {
+        const install = await this.getInstallById(installId);
+        if (install && install.status === 'running') {
+          await this.updateInstallStatus(installId, 'manual_review', 'Installation taking longer than expected - requires manual verification');
+          logger.warn('Installation requires manual review:', { installId, userId, ip, duration: '15+ minutes' });
+        }
+      } catch (error: any) {
+        logger.error('Scheduled manual review check failed:', { installId, userId, error: error.message });
+      }
+    }, delay);
+    
+    logger.info(`Scheduled manual review check for install ${installId} in ${Math.round(delay / 1000)}s`);
   }
 
   /**
@@ -842,7 +987,7 @@ export class InstallService {
    */
   private static async checkWindowsRDP(ip: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port: 22, timeout: 10000 });
+      const socket = createConnection({ host: ip, port: 22, timeout: 5000 });
       
       socket.on('connect', () => {
         socket.destroy();
@@ -924,105 +1069,87 @@ export class InstallService {
   }
 
   /**
-   * Handle installation progress updates from remote script or download tracking
+   * Get default installation script if file doesn't exist
    */
-  static async handleProgressUpdate(
-    installId: number,
-    step: string,
-    status: 'pending' | 'running' | 'completed' | 'failed',
-    message: string
-  ): Promise<void> {
+  private static getDefaultInstallScript(): string {
+    return `#!/bin/bash
+# Default installation script
+__PASSWD__
+sleep 5
+curl __GZLINK__
+`;
+  }
+
+  /**
+   * Get installation by ID
+   */
+  static async getInstallById(installId: number): Promise<any> {
     try {
       const db = getDatabase();
-      
-      // Get install data with user info for notifications
       const install = await db.get(
-        'SELECT user_id, ip, win_ver, passwd_rdp FROM install_data WHERE id = ?',
+        'SELECT * FROM install_data WHERE id = ?',
         [installId]
       );
       
-      if (!install) {
-        logger.error('Install not found for progress update:', { installId });
-        return;
-      }
-
-      // Update main status (this will send real-time notifications)
-      await this.updateInstallStatus(installId, status, message, true);
-
-      // Handle specific progress steps
-      if (step === 'install_complete' && status === 'completed') {
-        // Installation script completed, now wait for Windows to boot
-        setTimeout(async () => {
-          try {
-            // Check if Windows RDP is accessible after 3 minutes
-            const isWindowsReady = await this.checkWindowsRDP(install.ip);
-            
-            if (isWindowsReady) {
-              await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully', true);
-              
-              logger.info('Windows RDP is accessible, installation completed:', {
-                installId,
-                ip: install.ip
-              });
-            } else {
-              // Windows not ready yet, check again in 5 sec
-              setTimeout(async () => {
-                const isReady = await this.checkWindowsRDP(install.ip);
-                if (isReady) {
-                  await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully', true);
-                  
-                  logger.info('Windows RDP accessible after additional wait:', {
-                    installId,
-                    ip: install.ip
-                  });
-                } else {
-                  await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but Windows RDP not accessible - requires manual verification', true);
-                }
-              }, 0.05 * 60 * 1000); // 5 sec
-            }
-          } catch (error: any) {
-            logger.error('Error checking Windows readiness:', error);
-            await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but verification failed - requires manual check', true);
-          }
-        }, 3 * 60 * 1000); // 3 minutes after script completion
-      } else if (step === 'installation_error' && status === 'failed') {
-        // Handle installation errors with quota refund
-        try {
-          // const db = getDatabase();
-          // await db.run(
-          //   'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
-          //   [DateUtils.nowSQLite(), install.user_id]
-          // );
-          
-          logger.info('Quota refunded due to installation failure:', {
-            installId,
-            userId: install.user_id,
-            error: message
-          });
-          
-          // Update status with refund message
-          await this.updateInstallStatus(installId, 'failed', `${message}`, true);
-        } catch (refundError: any) {
-          logger.error('Failed to refund quota:', refundError);
-          await this.updateInstallStatus(installId, 'failed', message, true);
-        }
-      }
-      
-      logger.info('Installation progress updated:', {
-        installId,
-        step,
-        status,
-        message,
-        timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
-      });
-      
+      return install;
     } catch (error: any) {
-      logger.error('Failed to handle progress update:', {
-        installId,
-        step,
-        status,
-        error: error.message
-      });
+      logger.error('Failed to get install by ID:', { installId, error: error.message });
+      return null;
+    }
+  }
+
+  /**
+   * Get user's active installations
+   */
+  static async getUserActiveInstalls(userId: number): Promise<any[]> {
+    try {
+      const db = getDatabase();
+      const installs = await db.all(
+        'SELECT * FROM install_data WHERE user_id = ? AND status IN (?, ?, ?) ORDER BY created_at DESC',
+        [userId, 'pending', 'running', 'manual_review']
+      );
+      
+      return installs;
+    } catch (error: any) {
+      logger.error('Failed to get user active installs:', { userId, error: error.message });
+      return [];
+    }
+  }
+
+  /**
+   * Validate signature for download protection
+   */
+  static validateSignature(ip: string, filename: string, signature: string): boolean {
+    try {
+      const parts = signature.split('.');
+      if (parts.length !== 2) {
+        return false;
+      }
+      
+      const [timestampStr, sig] = parts;
+      if (!timestampStr || !sig) {
+        return false;
+      }
+      
+      const timestamp = parseInt(timestampStr);
+      if (isNaN(timestamp)) {
+        return false;
+      }
+      
+      // Check expiration (6 minutes)
+      const now = Math.floor(Date.now() / 1000);
+      if (now - timestamp > 6 * 60) {
+        return false;
+      }
+
+      // Validate signature
+      const raw = `${ip}:${filename}:${timestamp}`;
+      const expectedSig = crypto.createHash('sha256').update(raw).digest('hex');
+
+      return sig === expectedSig;
+    } catch (error) {
+      logger.error('Signature validation failed:', error);
+      return false;
     }
   }
 
@@ -1091,143 +1218,6 @@ export class InstallService {
         filename,
         error: error.message
       });
-    }
-  }
-
-  /**
-   * Get default installation script if file doesn't exist
-   */
-  private static getDefaultInstallScript(): string {
-    return `#!/bin/bash
-# Default installation script
-__GZLINK__
-__PASSWD__
-`;
-  }
-
-  /**
-   * Get installation by ID
-   */
-  static async getInstallById(installId: number): Promise<any> {
-    try {
-      const db = getDatabase();
-      const install = await db.get(
-        'SELECT * FROM install_data WHERE id = ?',
-        [installId]
-      );
-      
-      return install;
-    } catch (error: any) {
-      logger.error('Failed to get install by ID:', { installId, error: error.message });
-      return null;
-    }
-  }
-
-  /**
-   * Get user's active installations
-   */
-  static async getUserActiveInstalls(userId: number): Promise<any[]> {
-    try {
-      const db = getDatabase();
-      const installs = await db.all(
-        'SELECT * FROM install_data WHERE user_id = ? AND status IN (?, ?, ?) ORDER BY created_at DESC',
-        [userId, 'pending', 'running', 'manual_review']
-      );
-      
-      return installs;
-    } catch (error: any) {
-      logger.error('Failed to get user active installs:', { userId, error: error.message });
-      return [];
-    }
-  }
-
-  /**
-   * Cancel installation (if still pending)
-   */
-  static async cancelInstallation(installId: number, userId: number): Promise<boolean> {
-    try {
-      const db = getDatabase();
-      
-      // Check if installation can be cancelled
-      const install = await db.get(
-        'SELECT status, user_id FROM install_data WHERE id = ?',
-        [installId]
-      );
-
-      if (!install) {
-        throw new Error('Installation not found');
-      }
-
-      if (install.user_id !== userId) {
-        throw new Error('Unauthorized to cancel this installation');
-      }
-
-      if (install.status !== 'pending') {
-        throw new Error('Installation cannot be cancelled at this stage');
-      }
-
-      // Update status to cancelled and refund quota
-      await db.run(
-        'UPDATE install_data SET status = ?, updated_at = ? WHERE id = ?',
-        ['cancelled', DateUtils.nowSQLite(), installId]
-      );
-
-      // await db.run(
-      //   'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
-      //   [DateUtils.nowSQLite(), userId]
-      // );
-
-      logger.info('Installation cancelled :', {
-        installId,
-        userId
-      });
-
-      return true;
-    } catch (error: any) {
-      logger.error('Failed to cancel installation:', {
-        installId,
-        userId,
-        error: error.message
-      });
-      
-      throw error;
-    }
-  }
-
-  /**
-   * Validate signature for download protection
-   */
-  static validateSignature(ip: string, filename: string, signature: string): boolean {
-    try {
-      const parts = signature.split('.');
-      if (parts.length !== 2) {
-        return false;
-      }
-      
-      const [timestampStr, sig] = parts;
-      if (!timestampStr || !sig) {
-        return false;
-      }
-      
-      const timestamp = parseInt(timestampStr);
-      if (isNaN(timestamp)) {
-        return false;
-      }
-      
-      // Check expiration (6 minutes)
-      const now = Math.floor(Date.now() / 1000);
-      if (now - timestamp > 6 * 60) {
-        return false;
-      }
-
-      // Validate signature
-      const raw = `${ip}:${filename}:${timestamp}`;
-      const expectedSig = crypto.createHash('sha256').update(raw).digest('hex');
-
-      return sig === expectedSig;
-    } catch (error) {
-      logger.error('Signature validation failed:', error);
-      return false;
     }
   }
 }

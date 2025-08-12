@@ -62,6 +62,7 @@ export async function initializeDatabase(): Promise<Database> {
     
     // Seed initial data
     await seedProducts();
+    await seedDefaultAdmin();
     
     logger.info(`Database initialized at ${dbPath} with Asia/Jakarta timezone`);
     return db;
@@ -88,6 +89,8 @@ async function createTables(): Promise<void> {
         is_active BOOLEAN DEFAULT TRUE,
         admin INTEGER DEFAULT 0,
         telegram VARCHAR(255),
+        telegram_user_id INTEGER,
+        telegram_display_name VARCHAR(255),
         quota INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT '${jakartaTime}',
         updated_at DATETIME DEFAULT '${jakartaTime}',
@@ -104,6 +107,33 @@ async function createTables(): Promise<void> {
       // Column doesn't exist, add it
       logger.info('Adding quota column to users table');
       await db.run('ALTER TABLE users ADD COLUMN quota INTEGER DEFAULT 0');
+    }
+
+    // Check if telegram_notifications column exists, if not add it
+    try {
+      await db.get('SELECT telegram_notifications FROM users LIMIT 1');
+    } catch (error) {
+      // Column doesn't exist, add it
+      logger.info('Adding telegram_notifications column to users table');
+      await db.run('ALTER TABLE users ADD COLUMN telegram_notifications BOOLEAN DEFAULT 0');
+    }
+
+    // Check if telegram_user_id column exists, if not add it
+    try {
+      await db.get('SELECT telegram_user_id FROM users LIMIT 1');
+    } catch (error) {
+      // Column doesn't exist, add it
+      logger.info('Adding telegram_user_id column to users table');
+      await db.run('ALTER TABLE users ADD COLUMN telegram_user_id INTEGER');
+    }
+
+    // Check if telegram_display_name column exists, if not add it
+    try {
+      await db.get('SELECT telegram_display_name FROM users LIMIT 1');
+    } catch (error) {
+      // Column doesn't exist, add it
+      logger.info('Adding telegram_display_name column to users table');
+      await db.run('ALTER TABLE users ADD COLUMN telegram_display_name VARCHAR(255)');
     }
     
     // Email verification codes table
@@ -271,6 +301,25 @@ async function createTables(): Promise<void> {
     await db.run('CREATE INDEX IF NOT EXISTS idx_orders_no_ref ON orders (no_ref)');
     await db.run('CREATE INDEX IF NOT EXISTS idx_orders_merchant_ref ON orders (merchant_ref)');
     await db.run('CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status)');
+
+    // Telegram connection tokens table
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS telegram_connection_tokens (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        token TEXT UNIQUE NOT NULL,
+        telegram_user_id INTEGER,
+        expires_at DATETIME NOT NULL,
+        created_at DATETIME DEFAULT '${jakartaTime}',
+        used_at DATETIME,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      )
+    `);
+
+    // Create indexes for telegram_connection_tokens
+    await db.run('CREATE INDEX IF NOT EXISTS idx_telegram_tokens_user_id ON telegram_connection_tokens (user_id)');
+    await db.run('CREATE INDEX IF NOT EXISTS idx_telegram_tokens_token ON telegram_connection_tokens (token)');
+    await db.run('CREATE INDEX IF NOT EXISTS idx_telegram_tokens_expires ON telegram_connection_tokens (expires_at)');
     
     logger.info('Database tables created successfully with Asia/Jakarta timezone');
   } catch (error) {
@@ -440,6 +489,56 @@ async function createTopupTransactionsTable(): Promise<void> {
     } else {
       throw error;
     }
+  }
+}
+
+async function seedDefaultAdmin(): Promise<void> {
+  if (!db) throw new Error('Database not initialized');
+  
+  try {
+    // Check if admin user already exists
+    const existingAdmin = await db.get('SELECT id FROM users WHERE username = ? OR email = ?', ['kang3s', 'payment.adsku@gmail.com']);
+    
+    if (!existingAdmin) {
+      logger.info('Creating default administrator user');
+      
+      // Import AuthUtils for password hashing
+      const { AuthUtils } = await import('../utils/auth.js');
+      
+      // Hash the default password
+      const passwordHash = await AuthUtils.hashPassword('AU13579t@');
+      const jakartaTime = DateUtils.nowSQLite();
+      
+      // Insert default admin user
+      await db.run(`
+        INSERT INTO users (
+          username, email, password_hash, is_verified, is_active, admin, quota,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        'kang3s',
+        'payment.adsku@gmail.com',
+        passwordHash,
+        1, // is_verified = true
+        1, // is_active = true
+        1, // admin = 1 (administrator)
+        100, // Default quota for admin
+        jakartaTime,
+        jakartaTime
+      ]);
+      
+      logger.info('Default administrator user created successfully:', {
+        username: 'kang3s',
+        email: 'payment.adsku@gmail.com',
+        admin: 1,
+        quota: 100
+      });
+    } else {
+      logger.info('Default administrator user already exists, skipping creation');
+    }
+  } catch (error) {
+    logger.error('Error creating default administrator user:', error);
+    throw error;
   }
 }
 
