@@ -58,10 +58,13 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbG
       }
 
       // Validate signature
-      if (!InstallService.validateSignature(ip, filename, signature)) {
+      const signatureResult = InstallService.validateSignature(ip, filename, signature);
+      if (!signatureResult.isValid || !signatureResult.installId) {
         logger.warn('Invalid signature:', { ip, filename, signature });
         return res.status(403).send('Access denied');
       }
+      
+      const installId = signatureResult.installId;
 
       // Validate file extension
       if (!filename.endsWith('.gz')) {
@@ -89,7 +92,7 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbG
       }
 
       // Log download access and handle installation progress
-      await InstallService.handleDownloadAccess(ip, filename, userAgent, region);
+      await InstallService.handleDownloadAccess(installId, filename, userAgent, region, ip);
 
       // Redirect to actual file
       const fileUrl = `${BASE_URLS[region as keyof typeof BASE_URLS]}/${filename}`;

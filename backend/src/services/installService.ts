@@ -453,7 +453,7 @@ export class InstallService {
       
       // Generate protected download link
       const gzFilename = `${winVersion}.gz`;
-      const signature = this.generateSignedUrl(ip, gzFilename);
+      const signature = this.generateSignedUrl(ip, gzFilename, installId);
       const gzLink = `${this.TRACK_SERVER}/download/${region}/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbGxhdGlvbi55b3Uuc2hvbGRudC5zZWUudGhpcw/${gzFilename}${signature}`;
 
       logger.info('Generated installation link:', {
@@ -535,12 +535,12 @@ export class InstallService {
   /**
    * Generate signed URL for download protection
    */
-  private static generateSignedUrl(ip: string, filename: string): string {
+  private static generateSignedUrl(ip: string, filename: string, installId: number): string {
     const timestamp = Math.floor(Date.now() / 1000);
-    const raw = `${ip}:${filename}:${timestamp}`;
+    const raw = `${ip}:${filename}:${installId}:${timestamp}`;
     const signature = crypto.createHash('sha256').update(raw).digest('hex');
     
-    return `?sig=${timestamp}.${signature}`;
+    return `?sig=${timestamp}.${installId}.${signature}`;
   }
 
   /**
@@ -1118,38 +1118,47 @@ curl __GZLINK__
 
   /**
    * Validate signature for download protection
+   * @param ip - The IP address
+   * @param filename - The filename
+   * @param signature - The signature in format "timestamp.installId.signature"
+   * @returns Object with validation result and installId if valid
    */
-  static validateSignature(ip: string, filename: string, signature: string): boolean {
+  static validateSignature(ip: string, filename: string, signature: string): { isValid: boolean; installId?: number } {
     try {
       const parts = signature.split('.');
-      if (parts.length !== 2) {
-        return false;
+      if (parts.length !== 3) {
+        return { isValid: false };
       }
       
-      const [timestampStr, sig] = parts;
-      if (!timestampStr || !sig) {
-        return false;
+      const [timestampStr, installIdStr, sig] = parts;
+      if (!timestampStr || !installIdStr || !sig) {
+        return { isValid: false };
       }
       
       const timestamp = parseInt(timestampStr);
-      if (isNaN(timestamp)) {
-        return false;
+      const installId = parseInt(installIdStr);
+      if (isNaN(timestamp) || isNaN(installId)) {
+        return { isValid: false };
       }
       
       // Check expiration (6 minutes)
       const now = Math.floor(Date.now() / 1000);
       if (now - timestamp > 6 * 60) {
-        return false;
+        return { isValid: false };
       }
 
       // Validate signature
-      const raw = `${ip}:${filename}:${timestamp}`;
+      const raw = `${ip}:${filename}:${installId}:${timestamp}`;
       const expectedSig = crypto.createHash('sha256').update(raw).digest('hex');
 
-      return sig === expectedSig;
+      if (sig === expectedSig) {
+        return { isValid: true, installId };
+      }
+      
+      return { isValid: false };
     } catch (error) {
       logger.error('Signature validation failed:', error);
-      return false;
+      return { isValid: false };
     }
   }
 
@@ -1157,14 +1166,16 @@ curl __GZLINK__
    * Handle download access tracking (called when gzLink is accessed)
    */
   static async handleDownloadAccess(
-    ip: string,
+    installId: number,
     filename: string,
     userAgent: string,
-    region: string
+    region: string,
+    ip: string
   ): Promise<void> {
     try {
       // Log download access
       logger.info('Download access logged:', {
+        installId,
         ip,
         filename,
         userAgent,
@@ -1174,46 +1185,42 @@ curl __GZLINK__
 
       const db = getDatabase();
 
-      // If User-Agent contains 'curl', it means installation is preparing
-      if (userAgent.toLowerCase().includes('curl')) {
-        // Find the installation record by IP and update status to preparing
-        const install = await db.get(
-          'SELECT id, user_id, win_ver FROM install_data WHERE ip = ? AND status = ? ORDER BY created_at DESC LIMIT 1',
-          [ip, 'pending']
-        );
+      // Get the specific installation by ID
+      const install = await db.get(
+        'SELECT id, user_id, win_ver, status FROM install_data WHERE id = ?',
+        [installId]
+      );
 
-        if (install) {
-          await this.updateInstallStatus(install.id, 'preparing', 'Installation is preparing - downloading configuration files', true);
-          
-          logger.info('Installation status updated to preparing via curl access:', {
-            installId: install.id,
-            userId: install.user_id,
-            ip,
-            filename
-          });
-        }
+      if (!install) {
+        logger.warn('Installation not found for download access:', { installId, ip, filename });
+        return;
+      }
+
+      // If User-Agent contains 'curl', it means installation is preparing
+      if (userAgent.toLowerCase().includes('curl') && install.status === 'pending') {
+        await this.updateInstallStatus(installId, 'preparing', 'Installation is preparing - downloading configuration files', true);
+        
+        logger.info('Installation status updated to preparing via curl access:', {
+          installId,
+          userId: install.user_id,
+          ip,
+          filename
+        });
       }
       // If User-Agent contains 'wget', it means installation is running
-      else if (userAgent.toLowerCase().includes('wget')) {
-        // Find the installation record by IP and update status to running
-        const install = await db.get(
-          'SELECT id, user_id, win_ver FROM install_data WHERE ip = ? AND status IN (?, ?) ORDER BY created_at DESC LIMIT 1',
-          [ip, 'pending', 'preparing']
-        );
-
-        if (install) {
-          await this.updateInstallStatus(install.id, 'running', 'Windows installation is now running - downloading files', true);
-          
-          logger.info('Installation status updated to running via wget access:', {
-            installId: install.id,
-            userId: install.user_id,
-            ip,
-            filename
-          });
-        }
+      else if (userAgent.toLowerCase().includes('wget') && ['pending', 'preparing'].includes(install.status)) {
+        await this.updateInstallStatus(installId, 'running', 'Windows installation is now running - downloading files', true);
+        
+        logger.info('Installation status updated to running via wget access:', {
+          installId,
+          userId: install.user_id,
+          ip,
+          filename
+        });
       }
     } catch (error: any) {
       logger.error('Failed to handle download access:', {
+        installId,
         ip,
         filename,
         error: error.message
