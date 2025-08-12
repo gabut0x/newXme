@@ -738,87 +738,103 @@ export class InstallService {
   }
 
   /**
-   * Start monitoring installation progress
+   * Start monitoring installation progress with improved time-based checking
    */
   private static async startInstallationMonitoring(
     installId: number,
     userId: number,
     ip: string
   ): Promise<void> {
-    // Check if installation starts running within 3 minutes
-    setTimeout(async () => {
+    // Start periodic monitoring every 30 seconds
+    const monitoringInterval = setInterval(async () => {
       try {
         const install = await this.getInstallById(installId);
-        
-        if (install && install.status === 'pending') {
-          // Installation hasn't started running - there's a problem
-          await this.updateInstallStatus(installId, 'failed', 'Installation failed to start within expected time');
-          
-          logger.warn('Installation failed to start within 3 minutes:', {
-            installId,
-            userId,
-            ip
-          });
+        if (!install) {
+          clearInterval(monitoringInterval);
+          return;
         }
-      } catch (error: any) {
-        logger.error('Installation monitoring (2 min check) failed:', {
-          installId,
-          userId,
-          error: error.message
-        });
-      }
-    }, 3 * 60 * 1000); // 3 minutes
 
-    // Check if installation completes within 6 minutes (if status is running)
-    setTimeout(async () => {
-      try {
-        const install = await this.getInstallById(installId);
-        
-        if (install && install.status === 'running') {
-          // Check if Windows is accessible via RDP (port 22)
-          const isWindowsReady = await this.checkWindowsRDP(ip);
-          
-          if (isWindowsReady) {
-            await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
+        const updatedTime = new Date(install.updated_at).getTime();
+        const now = Date.now();
+        const minutesSinceUpdate = Math.floor((now - updatedTime) / (60 * 1000));
+
+        // For pending/preparing status - check if no progress to 'running' within 3 minutes
+        if (['pending', 'preparing'].includes(install.status)) {
+          if (minutesSinceUpdate >= 3) {
+            await this.updateInstallStatus(installId, 'failed', 'Installation failed to start within expected time');
+            clearInterval(monitoringInterval);
             
-            // Completion notification already sent via updateInstallStatus above
-          } else {
-            // Windows not ready yet, mark for manual review
-            await this.updateInstallStatus(installId, 'manual_review', 'Installation completed but Windows RDP not accessible - requires manual verification');
+            logger.warn('Installation failed to start within 3 minutes:', {
+              installId,
+              userId,
+              ip,
+              status: install.status,
+              minutesSinceUpdate
+            });
           }
         }
-      } catch (error: any) {
-        logger.error('Installation monitoring (10min check) failed:', {
-          installId,
-          userId,
-          error: error.message
-        });
-      }
-    }, 4 * 60 * 1000); // 4 minutes
-
-    // Final check after 15 minutes - mark as needs manual review if still running
-    setTimeout(async () => {
-      try {
-        const install = await this.getInstallById(installId);
-        
-        if (install && install.status === 'running') {
-          await this.updateInstallStatus(installId, 'manual_review', 'Installation taking longer than expected - requires manual verification');
-          
-          logger.warn('Installation requires manual review:', {
+        // For running status - periodic RDP checking and timeout management
+        else if (install.status === 'running') {
+          // Start RDP checking after 3 minutes from when status became 'running'
+          if (minutesSinceUpdate >= 3) {
+            // Check RDP connectivity
+            const isWindowsReady = await this.checkWindowsRDP(ip);
+            
+            if (isWindowsReady) {
+              await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
+              clearInterval(monitoringInterval);
+              
+              logger.info('Installation completed - Windows RDP accessible:', {
+                installId,
+                userId,
+                ip,
+                minutesSinceRunning: minutesSinceUpdate
+              });
+            } else if (minutesSinceUpdate >= 15) {
+              // If running for more than 15 minutes without RDP access, mark for manual review
+              await this.updateInstallStatus(installId, 'manual_review', 'Installation taking longer than expected - requires manual verification');
+              clearInterval(monitoringInterval);
+              
+              logger.warn('Installation requires manual review after 15 minutes:', {
+                installId,
+                userId,
+                ip,
+                minutesSinceRunning: minutesSinceUpdate
+              });
+            }
+          }
+        }
+        // Stop monitoring for final states
+        else if (['completed', 'failed', 'manual_review'].includes(install.status)) {
+          clearInterval(monitoringInterval);
+          logger.info('Monitoring stopped for final status:', {
             installId,
-            userId,
-            ip,
-            duration: '15+ minutes'
+            status: install.status
           });
         }
+
       } catch (error: any) {
-        logger.error('Installation monitoring (20min check) failed:', {
+        logger.error('Installation monitoring check failed:', {
           installId,
           userId,
           error: error.message
         });
       }
-    }, 15 * 60 * 1000); // 15 minutes
+    }, 5000); // Check every 5 seconds for running installations (RDP check)
+
+    // Set a maximum monitoring duration (30 minutes) as a safety net
+    setTimeout(() => {
+      clearInterval(monitoringInterval);
+      logger.info('Monitoring timeout reached for installation:', { installId });
+    }, 30 * 60 * 1000); // 30 minutes max monitoring
+
+    logger.info('Started enhanced installation monitoring:', {
+      installId,
+      userId,
+      ip,
+      checkInterval: '5 seconds',
+      maxDuration: '30 minutes'
+    });
   }
 /**
    * Resume installation monitoring after server restart

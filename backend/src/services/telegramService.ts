@@ -277,7 +277,7 @@ export class TelegramService {
     const db = getDatabase();
     
     try {
-      // Get user's Telegram settings
+      // Get user's Telegram settings and RDP password for completed installations
       const user = await db.get(`
         SELECT telegram_user_id, telegram_notifications, username
         FROM users
@@ -308,13 +308,36 @@ export class TelegramService {
 
       // Format notification message
       const statusEmoji = this.getStatusEmoji(notification.status);
-      const message =
+      let message =
         `${statusEmoji} Installation Update\n\n` +
         `📋 Status: ${notification.status.toUpperCase()}\n` +
         `🖥️ Server: ${notification.ip}\n` +
         `💻 Windows: ${windowsVersionName}\n\n` +
-        `${notification.message}\n\n` +
-        `Check your dashboard for more details.`;
+        `${notification.message}`;
+
+      // Add RDP connection details for completed installations
+      if (notification.status.toLowerCase() === 'completed') {
+        try {
+          // Get RDP password from install_data
+          const installData = await db.get(`
+            SELECT passwd_rdp FROM install_data
+            WHERE ip = ? AND status = 'completed' AND user_id = ?
+            ORDER BY updated_at DESC LIMIT 1
+          `, [notification.ip, userId]);
+
+          if (installData && installData.passwd_rdp) {
+            message += `\n\n🔐 <b>RDP Connection Details:</b>\n` +
+                      `<b>Server:</b> <code>${notification.ip}:22</code>\n` +
+                      `<b>Username:</b> <code>Administrator</code>\n` +
+                      `<b>Password:</b> <code>${installData.passwd_rdp}</code>\n\n` +
+                      `💡 <i>Tap to copy the connection details above</i>`;
+          }
+        } catch (rdpError) {
+          logger.warn('Failed to get RDP password for completed installation:', rdpError);
+        }
+      }
+
+      message += `\n\nCheck your dashboard for more details.`;
 
       return await this.sendMessage(user.telegram_user_id, message);
     } catch (error) {

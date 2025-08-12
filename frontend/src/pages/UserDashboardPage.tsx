@@ -44,7 +44,6 @@ import {
   Shield,
   CreditCard,
   LayoutDashboard,
-  Download,
   ChevronLeft,
   ChevronRight,
   Menu,
@@ -57,7 +56,10 @@ import {
   TrendingUp,
   Coins,
   Server,
-  RefreshCw
+  RefreshCw,
+  ExternalLink,
+  Download,
+  Copy
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -132,6 +134,8 @@ export default function UserDashboardPage() {
   const [showVpsPassword, setShowVpsPassword] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [showRdpModal, setShowRdpModal] = useState(false);
+  const [selectedInstall, setSelectedInstall] = useState<InstallData | null>(null);
   
   // Settings states
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
@@ -439,6 +443,97 @@ export default function UserDashboardPage() {
         </Badge>;
       default:
         return <Badge variant="secondary">{status}</Badge>;
+    }
+  };
+
+  const handleRDPConnect = (install: InstallData) => {
+    setSelectedInstall(install);
+    setShowRdpModal(true);
+  };
+
+  const downloadRdpFile = (install: InstallData) => {
+    const rdpContent = `screen mode id:i:2
+use multimon:i:0
+desktopwidth:i:1920
+desktopheight:i:1200
+session bpp:i:32
+winposstr:s:0,3,0,0,800,600
+compression:i:1
+keyboardhook:i:2
+audiocapturemode:i:0
+videoplaybackmode:i:1
+connection type:i:7
+networkautodetect:i:1
+bandwidthautodetect:i:1
+displayconnectionbar:i:1
+enableworkspacereconnect:i:0
+remoteappmousemoveinject:i:1
+disable wallpaper:i:0
+allow font smoothing:i:0
+allow desktop composition:i:0
+disable full window drag:i:1
+disable menu anims:i:1
+disable themes:i:0
+disable cursor setting:i:0
+bitmapcachepersistenable:i:1
+full address:s:${install.ip}:22
+audiomode:i:0
+redirectprinters:i:1
+redirectlocation:i:0
+redirectcomports:i:0
+redirectsmartcards:i:1
+redirectwebauthn:i:1
+redirectclipboard:i:1
+redirectposdevices:i:0
+autoreconnection enabled:i:1
+authentication level:i:2
+prompt for credentials:i:0
+negotiate security layer:i:1
+remoteapplicationmode:i:0
+alternate shell:s:
+shell working directory:s:
+gatewayhostname:s:
+gatewayusagemethod:i:4
+gatewaycredentialssource:i:4
+gatewayprofileusagemethod:i:0
+promptcredentialonce:i:0
+gatewaybrokeringtype:i:0
+use redirection server name:i:0
+rdgiskdcproxy:i:0
+kdcproxyname:s:
+enablerdsaadauth:i:0
+username:s:Administrator`;
+
+    const blob = new Blob([rdpContent], { type: 'application/x-rdp' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = `${install.ip}-rdp.rdp`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+
+    toast({
+      title: "RDP File Downloaded",
+      description: "Double-click the downloaded .rdp file to connect to your Windows server.",
+    });
+  };
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({
+        title: `${label} Copied`,
+        description: `${label} has been copied to clipboard.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Copy Failed",
+        description: "Could not copy to clipboard.",
+        variant: "destructive"
+      });
     }
   };
 
@@ -1045,7 +1140,7 @@ export default function UserDashboardPage() {
                     <CardContent className="p-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-xs md:text-sm font-medium text-muted-foreground">Total Install</p>
+                          <p className="text-xs md:text-sm font-medium text-muted-foreground">Total VPS</p>
                           <p className="text-2xl font-bold text-foreground">{dashboardData.stats.totalVPS}</p>
                         </div>
                         <div className="h-12 w-12 bg-primary/10 rounded-lg flex items-center justify-center">
@@ -1381,6 +1476,7 @@ export default function UserDashboardPage() {
                                   <TableHead>Status</TableHead>
                                   <TableHead>Created</TableHead>
                                   <TableHead>Updated</TableHead>
+                                  <TableHead className="w-24">Actions</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
@@ -1394,6 +1490,19 @@ export default function UserDashboardPage() {
                                     <TableCell>{getStatusBadge(install.status)}</TableCell>
                                     <TableCell>{formatDate(install.created_at)}</TableCell>
                                     <TableCell>{formatDate(install.updated_at)}</TableCell>
+                                    <TableCell>
+                                      {install.status === 'completed' && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => handleRDPConnect(install)}
+                                          className="h-8"
+                                        >
+                                          <ExternalLink className="h-3 w-3 mr-1" />
+                                          Connect
+                                        </Button>
+                                      )}
+                                    </TableCell>
                                   </TableRow>
                                 ))}
                               </TableBody>
@@ -1432,6 +1541,19 @@ export default function UserDashboardPage() {
                                         <span>{formatDate(install.updated_at)}</span>
                                       </div>
                                     </div>
+                                    
+                                    {install.status === 'completed' && (
+                                      <div className="mt-3 pt-3 border-t">
+                                        <Button
+                                          size="sm"
+                                          onClick={() => handleRDPConnect(install)}
+                                          className="w-full"
+                                        >
+                                          <ExternalLink className="h-4 w-4 mr-2" />
+                                          Connect to RDP
+                                        </Button>
+                                      </div>
+                                    )}
                                   </CardContent>
                                 </Card>
                               ))}
@@ -2016,10 +2138,116 @@ export default function UserDashboardPage() {
         </Dialog>
       )}
 
+      {/* RDP Connection Modal */}
+      {selectedInstall && (
+        <Dialog open={showRdpModal} onOpenChange={setShowRdpModal}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <ExternalLink className="h-5 w-5" />
+                Connect to Windows RDP
+              </DialogTitle>
+              <DialogDescription>
+                Choose your preferred connection method for {selectedInstall.ip}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              {/* Connection Details Card */}
+              <Card>
+                <CardContent className="pt-4">
+                  <div className="space-y-3 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Server:</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono">{selectedInstall.ip}:22</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => copyToClipboard(`${selectedInstall.ip}:22`, "Server")}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Username:</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono">Administrator</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => copyToClipboard("Administrator", "Username")}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Password:</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono">{selectedInstall.passwd_rdp}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => copyToClipboard(selectedInstall.passwd_rdp, "Password")}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Windows:</span>
+                      <span>{getWindowsVersionName(selectedInstall.win_ver)}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Connection Options */}
+              <div className="space-y-3">
+                <Button
+                  onClick={() => {
+                    downloadRdpFile(selectedInstall);
+                    setShowRdpModal(false);
+                  }}
+                  className="w-full justify-start"
+                  variant="default"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download RDP File (Recommended)
+                </Button>
+              </div>
+
+              {/* Instructions */}
+              <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded-lg">
+                <p className="font-medium mb-1">📝 Instructions:</p>
+                <ul className="space-y-1">
+                  <li>• <strong>RDP File:</strong> Double-click to open in Remote Desktop</li>
+                  <li>• <strong>Manual:</strong> Open Remote Desktop Connection and use copy icons to get details</li>
+                  <li>• <strong>Port:</strong> Make sure to use port 22 (not default 3389)</li>
+                </ul>
+              </div>
+
+              <Button
+                variant="outline"
+                onClick={() => setShowRdpModal(false)}
+                className="w-full"
+              >
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
       {/* Click outside to close notifications */}
       {showNotifications && (
-        <div 
-          className="fixed inset-0 z-40" 
+        <div
+          className="fixed inset-0 z-40"
           onClick={() => setShowNotifications(false)}
         />
       )}
