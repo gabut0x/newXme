@@ -64,6 +64,10 @@ export async function initializeDatabase(): Promise<Database> {
     await seedProducts();
     await seedDefaultAdmin();
     
+    // Log seeded data for verification
+    const windowsVersions = await db.all('SELECT * FROM windows_versions');
+    logger.info('Windows versions in database after seeding:', windowsVersions);
+    
     logger.info(`Database initialized at ${dbPath} with Asia/Jakarta timezone`);
     return db;
   } catch (error) {

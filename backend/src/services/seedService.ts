@@ -29,8 +29,49 @@ export async function seedProducts() {
     } else {
       logger.info('Default product already exists');
     }
+    
+    // Seed Windows versions
+    await seedWindowsVersions();
   } catch (error) {
     logger.error('Error seeding products:', error);
+    throw error;
+  }
+}
+
+export async function seedWindowsVersions(): Promise<void> {
+  try {
+    const db = getDatabase();
+    
+    // Default Windows versions to seed
+    const defaultVersions = [
+      { name: 'Windows 10 Pro', slug: 'win10-pro' },
+      { name: 'Windows 11 Pro', slug: 'win11-pro' },
+      { name: 'Windows Server 2019', slug: 'winserver-2019' },
+      { name: 'Windows Server 2022', slug: 'winserver-2022' }
+    ];
+    
+    for (const version of defaultVersions) {
+      // Check if version already exists
+      const existing = await db.get('SELECT id FROM windows_versions WHERE slug = ?', [version.slug]);
+      
+      if (!existing) {
+        await db.run(`
+          INSERT INTO windows_versions (name, slug, created_at, updated_at)
+          VALUES (?, ?, ?, ?)
+        `, [
+          version.name,
+          version.slug,
+          DateUtils.nowSQLite(),
+          DateUtils.nowSQLite()
+        ]);
+        
+        logger.info('Windows version seeded:', version);
+      }
+    }
+    
+    logger.info('Windows versions seeding completed');
+  } catch (error) {
+    logger.error('Error seeding Windows versions:', error);
     throw error;
   }
 }

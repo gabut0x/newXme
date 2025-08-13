@@ -217,12 +217,23 @@ export class InstallService {
   private static async validateWindowsVersion(winVersion: string): Promise<InstallValidationResult> {
     try {
       const db = getDatabase();
+      
+      logger.info('Validating Windows version:', { winVersion });
+      
+      // Get all available versions for debugging
+      const allVersions = await db.all('SELECT id, name, slug FROM windows_versions');
+      logger.info('Available Windows versions in database:', allVersions);
+      
       const version = await db.get('SELECT id FROM windows_versions WHERE slug = ?', [winVersion]);
       
       if (!version) {
+        logger.error('Windows version not found:', { 
+          winVersion, 
+          availableVersions: allVersions.map(v => v.slug) 
+        });
         return { 
           isValid: false, 
-          error: 'Invalid Windows version selected', 
+          error: `Invalid Windows version '${winVersion}'. Available versions: ${allVersions.map(v => v.slug).join(', ')}`, 
           step: 'windows_validation' 
         };
       }
