@@ -1,18 +1,24 @@
+// React core
 import React, { useState, useEffect } from 'react';
+
+// UI Components - Form controls
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+// UI Components - Layout and display
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { useToast } from '@/hooks/use-toast';
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogDescription, 
-  DialogHeader, 
-  DialogTitle 
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+// UI Components - Dialogs
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
 } from '@/components/ui/dialog';
 import {
   AlertDialog,
@@ -24,12 +30,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { 
-  apiService, 
-  TopupCalculationResponse, 
+
+// Hooks and services
+import { useToast } from '@/hooks/use-toast';
+import {
+  apiService,
+  TopupCalculationResponse,
   TopupResponse,
   PaymentMethod
 } from '@/services/api';
+
+// Icons
 import {
   Calculator,
   CreditCard,

@@ -1,7 +1,18 @@
+// Node.js built-in modules
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Third-party packages
+import { z } from 'zod';
 import express, { Request, Response } from 'express';
+
+// Database and configuration
 import { getDatabase } from '../database/init.js';
-import { 
-  authenticateToken, 
+
+// Custom middleware
+import {
+  authenticateToken,
   requireVerifiedUser,
   validateRequest,
   asyncHandler,
@@ -11,15 +22,15 @@ import {
 import { requireAdmin, AuthenticatedRequest } from '../middleware/admin.js';
 import { uploadProductImage } from '../middleware/upload.js';
 import { auditLogger } from '../middleware/security.js';
+
+// Types and schemas
 import { windowsVersionSchema, productSchema } from '../types/user.js';
-import { logger } from '../utils/logger.js';
+
+// Services and utilities
 import { tripayService } from '../services/tripayService.js';
-import { z } from 'zod';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { DateUtils } from '../utils/dateUtils.js';
 import { DatabaseSecurity } from '../utils/dbSecurity.js';
+import { DateUtils } from '../utils/dateUtils.js';
+import { logger } from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

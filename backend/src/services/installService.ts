@@ -34,7 +34,9 @@ export class InstallService {
     'Debian GNU/Linux': ['12']
   };
 
-  private static readonly TRACK_SERVER = process.env['TRACK_SERVER'] || 'https://b3f5795ff818.ngrok-free.app';
+  private static get TRACK_SERVER(): string {
+    return process.env['TRACK_SERVER'] || '';
+  }
 
   /**
    * Main installation process with comprehensive validation

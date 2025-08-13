@@ -11,13 +11,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import RecaptchaComponent, { RecaptchaRef } from '@/components/ui/recaptcha';
+import { TermsOfServiceModal } from '@/components/TermsOfServiceModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { 
-  Code, 
-  Eye, 
-  EyeOff, 
-  Loader2, 
+import {
+  Code,
+  Eye,
+  EyeOff,
+  Loader2,
   AlertCircle,
   ArrowLeft
 } from 'lucide-react';
@@ -231,13 +232,11 @@ export default function LoginPage() {
             <div className="mt-8 text-center">
               <p className="text-xs text-muted-foreground">
                 By signing in, you agree to our{' '}
-                <a href="#" className="text-primary hover:text-primary/80 transition-colors">
-                  Terms of Service
-                </a>{' '}
-                and{' '}
-                <a href="#" className="text-primary hover:text-primary/80 transition-colors">
-                  Privacy Policy
-                </a>
+                <TermsOfServiceModal>
+                  <button className="text-primary hover:text-primary/80 transition-colors underline-offset-4 hover:underline">
+                    Terms of Service
+                  </button>
+                </TermsOfServiceModal>
               </p>
             </div>
           </div>

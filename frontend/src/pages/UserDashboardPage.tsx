@@ -14,7 +14,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Progress } from '@/components/ui/progress';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useAuth, DashboardNotification } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -129,6 +128,7 @@ export default function UserDashboardPage() {
   const [paymentModalData, setPaymentModalData] = useState<PaymentModalData | null>(null);
   const [selectedTransaction, setSelectedTransaction] = useState<TopupTransaction | null>(null);
   const [showTransactionDetails, setShowTransactionDetails] = useState(false);
+  const [isCheckingPaymentStatus, setIsCheckingPaymentStatus] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showRdpPassword, setShowRdpPassword] = useState(false);
   const [showVpsPassword, setShowVpsPassword] = useState(false);
@@ -298,6 +298,64 @@ export default function UserDashboardPage() {
     const interval = setInterval(checkExpiredTransactions, 30000); // Check every 30 seconds
     return () => clearInterval(interval);
   }, [topupHistory]);
+
+  // Check payment status periodically when payment modal is open
+  useEffect(() => {
+    let pollInterval: NodeJS.Timeout | null = null;
+
+    if (showPaymentModal && paymentModalData?.reference) {
+      setIsCheckingPaymentStatus(true);
+      
+      const checkPaymentStatus = async () => {
+        try {
+          const response = await apiService.getTopupHistory();
+          
+          if (response.data.success && response.data.data) {
+            const currentTransaction = response.data.data.find(
+              (transaction: any) => transaction.reference === paymentModalData.reference
+            );
+            
+            if (currentTransaction && currentTransaction.status === 'PAID') {
+              // Payment successful - close modal and show success message
+              setShowPaymentModal(false);
+              setIsCheckingPaymentStatus(false);
+              
+              toast({
+                title: 'Payment Successful!',
+                description: `Your quota has been updated successfully. Added ${currentTransaction.quantity} quota to your account.`,
+                variant: 'default',
+              });
+              
+              // Refresh dashboard data and topup history
+              await loadData();
+              if (activeTab === 'topup-history') {
+                loadTopupHistory();
+              }
+              
+              // Clear the interval
+              if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error checking payment status:', error);
+        }
+      };
+
+      // Check immediately and then every 5 seconds
+      checkPaymentStatus();
+      pollInterval = setInterval(checkPaymentStatus, 5000);
+    }
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      setIsCheckingPaymentStatus(false);
+    };
+  }, [showPaymentModal, paymentModalData?.reference, activeTab, toast]);
 
   const loadData = async () => {
     try {
@@ -1946,9 +2004,15 @@ username:s:Administrator`;
               <DialogTitle className="flex items-center gap-2">
                 <CreditCard className="h-5 w-5" />
                 Complete Payment
+                {isCheckingPaymentStatus && (
+                  <Loader2 className="h-4 w-4 animate-spin ml-2 text-blue-500" />
+                )}
               </DialogTitle>
               <DialogDescription>
-                Complete your payment for transaction {paymentModalData.reference}
+                {isCheckingPaymentStatus
+                  ? `Complete your payment for transaction ${paymentModalData.reference}. We'll automatically detect when payment is completed.`
+                  : `Complete your payment for transaction ${paymentModalData.reference}`
+                }
               </DialogDescription>
             </DialogHeader>
 

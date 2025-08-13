@@ -7,10 +7,52 @@ import { logger } from './logger.js';
 import { DateUtils } from './dateUtils.js';
 
 export class AuthUtils {
-  private static readonly JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
-  private static readonly JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
-  private static readonly JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
-  private static readonly BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12');
+  private static _jwtSecret: string | null = null;
+  private static readonly JWT_EXPIRES_IN = process.env['JWT_EXPIRES_IN'] || '24h';
+  private static readonly JWT_REFRESH_EXPIRES_IN = process.env['JWT_REFRESH_EXPIRES_IN'] || '7d';
+  private static readonly BCRYPT_ROUNDS = parseInt(process.env['BCRYPT_ROUNDS'] || '12');
+
+  // Lazy-load JWT secret with validation
+  private static get JWT_SECRET(): string {
+    if (this._jwtSecret === null) {
+      this._jwtSecret = this.validateJWTSecret();
+    }
+    return this._jwtSecret!;
+  }
+
+  // Validate and return JWT secret with security checks
+  private static validateJWTSecret(): string {
+    const secret = process.env['JWT_SECRET'];
+    
+    if (!secret) {
+      logger.error('CRITICAL SECURITY WARNING: JWT_SECRET environment variable is not set!');
+      throw new Error('JWT_SECRET environment variable is required for security');
+    }
+    
+    if (secret.length < 32) {
+      logger.error('CRITICAL SECURITY WARNING: JWT_SECRET is too short! Minimum 32 characters required.');
+      throw new Error('JWT_SECRET must be at least 32 characters long for security');
+    }
+    
+    // Check for weak/common secrets
+    const weakSecrets = [
+      'fallback-secret-key', 'your-super-secret-jwt-key', 'change-this-in-production',
+      'secret', 'jwt-secret', 'your-jwt-secret', 'development', 'test', 'password'
+    ];
+    
+    if (weakSecrets.some(weak => secret.toLowerCase().includes(weak))) {
+      logger.error('CRITICAL SECURITY WARNING: JWT_SECRET appears to contain weak/default values!');
+      throw new Error('JWT_SECRET contains weak/default values. Please use a strong, unique secret.');
+    }
+    
+    // Check for sufficient entropy (basic check)
+    const uniqueChars = new Set(secret).size;
+    if (uniqueChars < 10) {
+      logger.warn('WARNING: JWT_SECRET may have low entropy. Consider using a more complex secret.');
+    }
+    
+    return secret;
+  }
 
   // Password hashing
   static async hashPassword(password: string): Promise<string> {
@@ -76,7 +118,7 @@ export class AuthUtils {
     };
     
     return jwt.sign(payload, this.JWT_SECRET, {
-      expiresIn: process.env.VERIFICATION_CODE_EXPIRES_MINUTES ? `${process.env.VERIFICATION_CODE_EXPIRES_MINUTES}m` : '15m',
+      expiresIn: process.env['VERIFICATION_CODE_EXPIRES_MINUTES'] ? `${process.env['VERIFICATION_CODE_EXPIRES_MINUTES']}m` : '15m',
       issuer: 'xme-projects',
       audience: 'xme-projects-reset',
     });

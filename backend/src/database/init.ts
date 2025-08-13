@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { logger } from '../utils/logger.js';
-import { seedProducts } from '../services/seedService.js';
+import { seedProducts, seedDefaultAdmin } from '../services/seedService.js';
 import { DateUtils } from '../utils/dateUtils.js';
 
 sqlite3.verbose();
@@ -492,55 +492,6 @@ async function createTopupTransactionsTable(): Promise<void> {
   }
 }
 
-async function seedDefaultAdmin(): Promise<void> {
-  if (!db) throw new Error('Database not initialized');
-  
-  try {
-    // Check if admin user already exists
-    const existingAdmin = await db.get('SELECT id FROM users WHERE username = ? OR email = ?', ['kang3s', 'payment.adsku@gmail.com']);
-    
-    if (!existingAdmin) {
-      logger.info('Creating default administrator user');
-      
-      // Import AuthUtils for password hashing
-      const { AuthUtils } = await import('../utils/auth.js');
-      
-      // Hash the default password
-      const passwordHash = await AuthUtils.hashPassword('AU13579t@');
-      const jakartaTime = DateUtils.nowSQLite();
-      
-      // Insert default admin user
-      await db.run(`
-        INSERT INTO users (
-          username, email, password_hash, is_verified, is_active, admin, quota,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        'kang3s',
-        'payment.adsku@gmail.com',
-        passwordHash,
-        1, // is_verified = true
-        1, // is_active = true
-        1, // admin = 1 (administrator)
-        100, // Default quota for admin
-        jakartaTime,
-        jakartaTime
-      ]);
-      
-      logger.info('Default administrator user created successfully:', {
-        username: 'kang3s',
-        email: 'payment.adsku@gmail.com',
-        admin: 1,
-        quota: 100
-      });
-    } else {
-      logger.info('Default administrator user already exists, skipping creation');
-    }
-  } catch (error) {
-    logger.error('Error creating default administrator user:', error);
-    throw error;
-  }
-}
 
 export function getDatabase(): Database {
   if (!db) {

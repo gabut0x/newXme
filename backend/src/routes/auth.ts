@@ -1,11 +1,10 @@
+// Third-party packages
 import express from 'express';
 import { Request, Response } from 'express';
-import { UserService } from '../services/userService.js';
-import { emailService } from '../services/emailService.js';
-import { AuthUtils } from '../utils/auth.js';
-import { SessionManager } from '../config/redis.js';
-import { 
-  authenticateToken, 
+
+// Custom middleware
+import {
+  authenticateToken,
   requireUnverifiedUser,
   loginRateLimit,
   registerRateLimit,
@@ -16,16 +15,24 @@ import {
   asyncHandler
 } from '../middleware/auth.js';
 import { verifyRecaptcha } from '../middleware/recaptcha.js';
-import { 
-  registerSchema, 
-  loginSchema, 
-  forgotPasswordSchema, 
-  resetPasswordSchema, 
-  verifyEmailSchema,
-  ApiResponse 
-} from '../types/user.js';
-import { logger } from '../utils/logger.js';
 import { BadRequestError, UnauthorizedError } from '../middleware/errorHandler.js';
+
+// Types and schemas
+import {
+  registerSchema,
+  loginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  verifyEmailSchema,
+  ApiResponse
+} from '../types/user.js';
+
+// Services and utilities
+import { UserService } from '../services/userService.js';
+import { emailService } from '../services/emailService.js';
+import { SessionManager } from '../config/redis.js';
+import { AuthUtils } from '../utils/auth.js';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 

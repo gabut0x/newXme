@@ -26,7 +26,7 @@ export class EmailService {
   private fromAddress: string;
 
   constructor() {
-    this.fromAddress = process.env.EMAIL_FROM || 'XME Notofications <xme.noreply@gmail.com.com>';
+    this.fromAddress = process.env.EMAIL_FROM || 'XME Notifications <noreply@xmeprojects.com>';
     // Don't create transporter immediately - wait for first use
   }
 

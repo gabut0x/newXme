@@ -1,8 +1,14 @@
+// Third-party packages
+import { z } from 'zod';
 import express from 'express';
 import { Request, Response } from 'express';
+
+// Database and configuration
 import { getDatabase } from '../database/init.js';
-import { 
-  authenticateToken, 
+
+// Custom middleware
+import {
+  authenticateToken,
   requireVerifiedUser,
   validateRequest,
   asyncHandler,
@@ -10,17 +16,19 @@ import {
   sqlInjectionProtection
 } from '../middleware/auth.js';
 import { auditLogger } from '../middleware/security.js';
-import { updateProfileSchema, installDataSchema, ApiResponse } from '../types/user.js';
-import { UserService } from '../services/userService.js';
-import { logger } from '../utils/logger.js';
 import { NotFoundError, BadRequestError } from '../middleware/errorHandler.js';
-import { z } from 'zod';
-import { tripayService } from '../services/tripayService.js';
-import { DateUtils } from '../utils/dateUtils.js';
-import { DatabaseSecurity } from '../utils/dbSecurity.js';
 
+// Types and schemas
+import { updateProfileSchema, installDataSchema, ApiResponse } from '../types/user.js';
+
+// Services and utilities
+import { UserService } from '../services/userService.js';
+import { tripayService } from '../services/tripayService.js';
 import { NotificationService } from '../services/notificationService.js';
 import { InstallService } from '../services/installService.js';
+import { DatabaseSecurity } from '../utils/dbSecurity.js';
+import { DateUtils } from '../utils/dateUtils.js';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 

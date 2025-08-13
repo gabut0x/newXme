@@ -11,13 +11,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import RecaptchaComponent, { RecaptchaRef } from '@/components/ui/recaptcha';
+import { TermsOfServiceModal } from '@/components/TermsOfServiceModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { 
-  Code, 
-  Eye, 
-  EyeOff, 
-  Loader2, 
+import {
+  Code,
+  Eye,
+  EyeOff,
+  Loader2,
   AlertCircle,
   ArrowLeft,
   CheckCircle,
@@ -131,7 +132,7 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="octra-header">
+      <header className="octra-header fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b">
         <div className="app-container py-4 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-3">
             <ArrowLeft className="h-4 w-4" />
@@ -145,7 +146,7 @@ export default function RegisterPage() {
       </header>
 
       {/* Main Content */}
-      <main className="app-container py-10">
+      <main className="app-container pt-24 pb-10">
         <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
           <div className="w-full max-w-md">
             <Card className="octra-card">
@@ -336,13 +337,11 @@ export default function RegisterPage() {
             <div className="mt-8 text-center">
                 <p className="text-xs text-muted-foreground">
                 By creating an account, you agree to our{' '}
-                <a href="#" className="text-primary hover:text-primary/80 transition-colors">
-                  Terms of Service
-                </a>{' '}
-                and{' '}
-                <a href="#" className="text-primary hover:text-primary/80 transition-colors">
-                  Privacy Policy
-                </a>
+                <TermsOfServiceModal>
+                  <button className="text-primary hover:text-primary/80 transition-colors underline-offset-4 hover:underline">
+                    Terms of Service
+                  </button>
+                </TermsOfServiceModal>
               </p>
             </div>
           </div>

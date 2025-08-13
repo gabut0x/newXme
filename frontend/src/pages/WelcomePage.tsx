@@ -7,8 +7,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import {
   Rocket, 
   ArrowRight,
-  Code,
-  Book
+  Code
 } from 'lucide-react';
 
 export default function WelcomePage() {
@@ -58,12 +57,6 @@ export default function WelcomePage() {
                 <Button size="lg" className="text-lg px-8 py-6">
                   <Rocket className="mr-2 h-5 w-5" />
                   Get Started
-                </Button>
-              </Link>
-              <Link to="/register">
-                <Button size="lg" variant="outline" className="text-lg px-8 py-6">
-                  <Book className="mr-2 h-5 w-5" />
-                  Learn More
                 </Button>
               </Link>
             </div>
