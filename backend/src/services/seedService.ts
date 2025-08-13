@@ -44,10 +44,10 @@ export async function seedWindowsVersions(): Promise<void> {
     
     // Default Windows versions to seed
     const defaultVersions = [
-      { name: 'Windows 10 Pro', slug: 'win10-pro' },
-      { name: 'Windows 11 Pro', slug: 'win11-pro' },
-      { name: 'Windows Server 2019', slug: 'winserver-2019' },
-      { name: 'Windows Server 2022', slug: 'winserver-2022' }
+      { name: 'Windows 10 Pro', slug: 'w10' },
+      { name: 'Windows 11 Pro', slug: 'w11' },
+      { name: 'Windows Server 2019', slug: 'ws19' },
+      { name: 'Windows Server 2022', slug: 'ws22' }
     ];
     
     for (const version of defaultVersions) {
