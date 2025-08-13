@@ -141,7 +141,10 @@ export interface InstallData {
   user_id: number;
   start_time: string;
   ip: string;
+  ssh_port: number;
+  auth_type: 'password' | 'ssh_key';
   passwd_vps?: string;
+  ssh_key?: string;
   win_ver: string;
   passwd_rdp?: string;
   status: string;
@@ -165,7 +168,10 @@ export interface CreateProductRequest {
 
 export interface CreateInstallRequest {
   ip: string;
+  ssh_port?: number;
+  auth_type?: 'password' | 'ssh_key';
   passwd_vps?: string;
+  ssh_key?: string;
   win_ver: string;
   passwd_rdp?: string;
 }

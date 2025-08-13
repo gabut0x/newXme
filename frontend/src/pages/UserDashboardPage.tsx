@@ -11,6 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -88,15 +89,38 @@ import TopupModal from '@/components/TopupModal';
 // Schema validation for install form
 const installSchema = z.object({
   ip: z.string()
-    .min(1, 'IP address is required')
-    .regex(/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/, 'Invalid IPv4 address'),
-  passwd_vps: z.string().min(1, 'VPS password is required'),
+    .min(1, 'VPS IP address is required')
+    .refine((value) => {
+      // Support both IP and IP:port formats
+      const ipPortRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?::([1-9][0-9]{0,4}))?$/;
+      const match = value.match(ipPortRegex);
+      if (!match) return false;
+      
+      // If port is specified, validate it's within valid range
+      if (match[1]) {
+        const port = parseInt(match[1]);
+        return port >= 1 && port <= 65535;
+      }
+      return true;
+    }, 'Invalid IP format. Use 1.1.1.1 or 1.1.1.1:port'),
+  auth_type: z.enum(['password', 'ssh_key']).default('password'),
+  passwd_vps: z.string().optional(),
+  ssh_key_file: z.any().optional(), // For file upload
   win_ver: z.string().min(1, 'Windows version is required'),
   passwd_rdp: z.string()
     .min(4, 'RDP password must be at least 4 characters')
     .refine((password) => !password.startsWith('#'), {
       message: 'RDP password cannot start with "#" character'
     }),
+}).refine((data) => {
+  // If auth_type is password, passwd_vps is required
+  if (data.auth_type === 'password' && (!data.passwd_vps || data.passwd_vps.trim() === '')) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'VPS password is required when using password authentication',
+  path: ['passwd_vps']
 });
 
 type InstallFormData = z.infer<typeof installSchema>;
@@ -132,6 +156,9 @@ export default function UserDashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showRdpPassword, setShowRdpPassword] = useState(false);
   const [showVpsPassword, setShowVpsPassword] = useState(false);
+  const [authType, setAuthType] = useState<'password' | 'ssh_key'>('password');
+  const [sshPort, setSshPort] = useState<string>('22');
+  const [sshKeyFile, setSshKeyFile] = useState<File | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showRdpModal, setShowRdpModal] = useState(false);
@@ -163,9 +190,40 @@ export default function UserDashboardPage() {
     formState: { errors },
     reset,
     setValue,
+    watch,
   } = useForm<InstallFormData>({
     resolver: zodResolver(installSchema),
+    defaultValues: {
+      auth_type: 'password'
+    }
   });
+
+  // Watch auth_type to conditionally show fields
+  const watchedAuthType = watch('auth_type');
+
+  // Helper function to parse IP and port
+  const parseIPAndPort = (ipString: string): { ip: string; port: number } => {
+    const parts = ipString.split(':');
+    if (parts.length === 2) {
+      return { ip: parts[0], port: parseInt(parts[1]) };
+    }
+    return { ip: parts[0], port: 22 };
+  };
+
+  // Handle SSH key file upload
+  const handleSshKeyFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setSshKeyFile(file);
+      // Read file content and set it to form
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        setValue('ssh_key_file', content);
+      };
+      reader.readAsText(file);
+    }
+  };
 
   // Update unread count and HTML title when notifications change
   useEffect(() => {
@@ -438,7 +496,22 @@ export default function UserDashboardPage() {
 
     try {
       setIsSubmitting(true);
-      const response = await apiService.createInstall(data);
+      
+      // Parse IP and port from the combined field
+      const { ip, port } = parseIPAndPort(data.ip);
+      
+      // Prepare install data
+      const installData = {
+        ip: ip,
+        ssh_port: port,
+        auth_type: data.auth_type,
+        passwd_vps: data.auth_type === 'password' ? data.passwd_vps : undefined,
+        ssh_key: data.auth_type === 'ssh_key' ? data.ssh_key_file : undefined,
+        win_ver: data.win_ver,
+        passwd_rdp: data.passwd_rdp
+      };
+      
+      const response = await apiService.createInstall(installData);
       
       if (response.data.success) {
         toast({
@@ -510,6 +583,7 @@ export default function UserDashboardPage() {
   };
 
   const downloadRdpFile = (install: InstallData) => {
+    const rdpPort = install.ssh_port || 22;
     const rdpContent = `screen mode id:i:2
 use multimon:i:0
 desktopwidth:i:1920
@@ -1369,101 +1443,178 @@ username:s:Administrator`;
                       </Alert>
                     ) : (
                       <form onSubmit={handleSubmit(onInstallSubmit)} className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="space-y-2">
-                            <Label htmlFor="ip">VPS IP Address *</Label>
-                            <Input
-                              id="ip"
-                              placeholder="192.168.1.100"
-                              {...register('ip')}
-                              className={errors.ip ? 'border-destructive' : ''}
-                            />
-                            {errors.ip && (
-                              <p className="text-sm text-destructive">{errors.ip.message}</p>
-                            )}
-                            <p className="text-xs text-muted-foreground">
-                              Ubuntu 22 is Recommended
-                            </p>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label htmlFor="passwd_vps">VPS Root Password *</Label>
-                            <div className="relative">
-                              <Input
-                                id="passwd_vps"
-                                type={showVpsPassword ? 'text' : 'password'}
-                                placeholder="Your VPS root password"
-                                {...register('passwd_vps')}
-                                className={errors.passwd_vps ? 'border-destructive pr-10' : 'pr-10'}
-                              />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                onClick={() => setShowVpsPassword(!showVpsPassword)}
-                              >
-                                {showVpsPassword ? (
-                                  <EyeOff className="h-4 w-4 text-muted-foreground" />
-                                ) : (
-                                  <Eye className="h-4 w-4 text-muted-foreground" />
+                        {/* VPS Connection Details */}
+                        <div className="space-y-4">
+                          <h3 className="text-lg font-semibold">VPS Connection Details</h3>
+                          
+                          <div className="space-y-4">
+                            {/* VPS IP Address and Authentication Method in one row */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                              <div className="space-y-2">
+                                <Label htmlFor="ip">VPS IP Address *</Label>
+                                <Input
+                                  id="ip"
+                                  placeholder="192.168.1.100 or 192.168.1.100:2222"
+                                  {...register('ip')}
+                                  className={errors.ip ? 'border-destructive' : ''}
+                                />
+                                {errors.ip && (
+                                  <p className="text-sm text-destructive">{errors.ip.message}</p>
                                 )}
-                              </Button>
-                            </div>
-                            {errors.passwd_vps && (
-                              <p className="text-sm text-destructive">{errors.passwd_vps.message}</p>
-                            )}
-                          </div>
+                                <p className="text-xs text-muted-foreground">
+                                  Use IP only (default port 22) or IP:port for custom SSH port. Ubuntu 22 is recommended.
+                                </p>
+                              </div>
 
-                          <div className="space-y-2">
-                            <Label htmlFor="win_ver">Windows Version *</Label>
-                            <Select onValueChange={(value) => setValue('win_ver', value)}>
-                              <SelectTrigger className={errors.win_ver ? 'border-destructive' : ''}>
-                                <SelectValue placeholder="Select Windows version" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {windowsVersions.map((version) => (
-                                  <SelectItem key={version.id} value={version.slug}>
-                                    {version.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            {errors.win_ver && (
-                              <p className="text-sm text-destructive">{errors.win_ver.message}</p>
-                            )}
-                          </div>
+                              <div className="space-y-2">
+                                <Label>Authentication Method *</Label>
+                                <RadioGroup
+                                  defaultValue="password"
+                                  onValueChange={(value: 'password' | 'ssh_key') => {
+                                    setAuthType(value);
+                                    setValue('auth_type', value);
+                                  }}
+                                  className="space-y-3"
+                                >
+                                  {/* Password Authentication Row */}
+                                  <div className="flex items-start space-x-3">
+                                    <div className="flex items-center space-x-2 pt-2.5">
+                                      <RadioGroupItem value="password" id="auth-password" />
+                                      <Label htmlFor="auth-password" className="text-sm min-w-[70px]">Password</Label>
+                                    </div>
+                                    <div className="flex-1">
+                                      {(watchedAuthType === 'password') && (
+                                        <div className="space-y-2">
+                                          <div className="relative">
+                                            <Input
+                                              id="passwd_vps"
+                                              type={showVpsPassword ? 'text' : 'password'}
+                                              placeholder="Your VPS root password"
+                                              {...register('passwd_vps')}
+                                              className={errors.passwd_vps ? 'border-destructive pr-10' : 'pr-10'}
+                                            />
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                              onClick={() => setShowVpsPassword(!showVpsPassword)}
+                                            >
+                                              {showVpsPassword ? (
+                                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                              ) : (
+                                                <Eye className="h-4 w-4 text-muted-foreground" />
+                                              )}
+                                            </Button>
+                                          </div>
+                                          {errors.passwd_vps && (
+                                            <p className="text-sm text-destructive">{errors.passwd_vps.message}</p>
+                                          )}
+                                          <p className="text-xs text-muted-foreground">
+                                            Enter your VPS root password
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
 
-                          <div className="space-y-2">
-                            <Label htmlFor="passwd_rdp">RDP Password *</Label>
-                            <div className="relative">
-                              <Input
-                                id="passwd_rdp"
-                                type={showRdpPassword ? 'text' : 'password'}
-                                placeholder="Windows RDP password"
-                                {...register('passwd_rdp')}
-                                className={errors.passwd_rdp ? 'border-destructive pr-10' : 'pr-10'}
-                              />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                onClick={() => setShowRdpPassword(!showRdpPassword)}
-                              >
-                                {showRdpPassword ? (
-                                  <EyeOff className="h-4 w-4 text-muted-foreground" />
-                                ) : (
-                                  <Eye className="h-4 w-4 text-muted-foreground" />
-                                )}
-                              </Button>
+                                  {/* SSH Key Authentication Row */}
+                                  <div className="flex items-start space-x-3">
+                                    <div className="flex items-center space-x-2 pt-2.5">
+                                      <RadioGroupItem value="ssh_key" id="auth-ssh-key" />
+                                      <Label htmlFor="auth-ssh-key" className="text-sm min-w-[70px]">SSH Key</Label>
+                                    </div>
+                                    <div className="flex-1">
+                                      {(watchedAuthType === 'ssh_key') && (
+                                        <div className="space-y-2">
+                                          <Input
+                                            id="ssh_key_file"
+                                            type="file"
+                                            accept=".pem,.key,.ppk,.openssh,*"
+                                            onChange={handleSshKeyFileChange}
+                                            className={errors.ssh_key_file ? 'border-destructive' : ''}
+                                          />
+                                          {sshKeyFile && sshKeyFile instanceof File && (
+                                            <div className="text-sm text-muted-foreground">
+                                              Selected: {sshKeyFile.name} ({(sshKeyFile.size / 1024).toFixed(2)} KB)
+                                            </div>
+                                          )}
+                                          {errors.ssh_key_file && (
+                                            <p className="text-sm text-destructive">
+                                              {typeof errors.ssh_key_file === 'string'
+                                                ? errors.ssh_key_file
+                                                : errors.ssh_key_file.message || 'SSH key file is required'}
+                                            </p>
+                                          )}
+                                          <p className="text-xs text-muted-foreground">
+                                            Upload your SSH private key file. Supports OpenSSH, RSA, PEM, PPK formats.
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </RadioGroup>
+                              </div>
                             </div>
-                            {errors.passwd_rdp && (
-                              <p className="text-sm text-destructive">{errors.passwd_rdp.message}</p>
-                            )}
-                            <p className="text-xs text-muted-foreground">
-                              Cannot start with #
-                            </p>
+                          </div>
+                        </div>
+
+                        {/* Windows Configuration */}
+                        <div className="space-y-4">
+                          <h3 className="text-lg font-semibold">Windows Configuration</h3>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                            <div className="space-y-2">
+                              <Label htmlFor="win_ver">Windows Version *</Label>
+                              <Select onValueChange={(value) => setValue('win_ver', value)}>
+                                <SelectTrigger className={errors.win_ver ? 'border-destructive' : ''}>
+                                  <SelectValue placeholder="Select Windows version" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {windowsVersions.map((version) => (
+                                    <SelectItem key={version.id} value={version.slug}>
+                                      {version.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {errors.win_ver && (
+                                <p className="text-sm text-destructive">{errors.win_ver.message}</p>
+                              )}
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="passwd_rdp">RDP Password *</Label>
+                              <div className="relative">
+                                <Input
+                                  id="passwd_rdp"
+                                  type={showRdpPassword ? 'text' : 'password'}
+                                  placeholder="Windows RDP password"
+                                  {...register('passwd_rdp')}
+                                  className={errors.passwd_rdp ? 'border-destructive pr-10' : 'pr-10'}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                  onClick={() => setShowRdpPassword(!showRdpPassword)}
+                                >
+                                  {showRdpPassword ? (
+                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                  ) : (
+                                    <Eye className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </Button>
+                              </div>
+                              {errors.passwd_rdp && (
+                                <p className="text-sm text-destructive">{errors.passwd_rdp.message}</p>
+                              )}
+                              <p className="text-xs text-muted-foreground">
+                                Cannot start with #
+                              </p>
+                            </div>
                           </div>
                         </div>
 
@@ -2224,12 +2375,12 @@ username:s:Administrator`;
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Server:</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono">{selectedInstall.ip}:22</span>
+                        <span className="font-mono">{selectedInstall.ip}:{selectedInstall.ssh_port || 22}</span>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
-                          onClick={() => copyToClipboard(`${selectedInstall.ip}:22`, "Server")}
+                          onClick={() => copyToClipboard(`${selectedInstall.ip}:${selectedInstall.ssh_port || 22}`, "Server")}
                         >
                           <Copy className="h-3 w-3" />
                         </Button>
@@ -2257,7 +2408,7 @@ username:s:Administrator`;
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
-                          onClick={() => copyToClipboard(selectedInstall.passwd_rdp, "Password")}
+                          onClick={() => copyToClipboard(selectedInstall.passwd_rdp || '', "Password")}
                         >
                           <Copy className="h-3 w-3" />
                         </Button>
@@ -2292,7 +2443,7 @@ username:s:Administrator`;
                 <ul className="space-y-1">
                   <li>• <strong>RDP File:</strong> Double-click to open in Remote Desktop</li>
                   <li>• <strong>Manual:</strong> Open Remote Desktop Connection and use copy icons to get details</li>
-                  <li>• <strong>Port:</strong> Make sure to use port 22 (not default 3389)</li>
+                  <li>• <strong>Port:</strong> Make sure to use port {selectedInstall.ssh_port || 22} (not default 3389)</li>
                 </ul>
               </div>
 

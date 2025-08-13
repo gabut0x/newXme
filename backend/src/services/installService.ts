@@ -44,7 +44,10 @@ export class InstallService {
   static async processInstallation(
     userId: number,
     ip: string,
+    sshPort: number,
+    authType: 'password' | 'ssh_key',
     vpsPassword: string,
+    sshKey: string,
     winVersion: string,
     rdpPassword: string
   ): Promise<{ success: boolean; message: string; installId?: number }> {
@@ -55,6 +58,8 @@ export class InstallService {
       logger.info('Starting Windows installation process:', {
         userId,
         ip,
+        sshPort,
+        authType,
         winVersion,
         timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       });
@@ -84,15 +89,17 @@ export class InstallService {
       }
 
       // Step 5: Check if VPS is online
-      const onlineValidation = await this.validateVPSOnline(ip);
+      const onlineValidation = await this.validateVPSOnline(ip, sshPort);
       if (!onlineValidation.isValid) {
         return { success: false, message: onlineValidation.error! };
       }
 
       // Step 6: Validate SSH credentials
-      const sshClient = await this.validateSSHCredentials(ip, vpsPassword);
+      const sshClient = await this.validateSSHCredentials(ip, sshPort, authType, vpsPassword, sshKey);
       if (!sshClient) {
-        return { success: false, message: 'SSH authentication failed. Please check your VPS password.' };
+        return { success: false, message: authType === 'password'
+          ? 'SSH authentication failed. Please check your VPS password.'
+          : 'SSH authentication failed. Please check your SSH key.' };
       }
 
       // Step 7: Validate OS support
@@ -110,12 +117,15 @@ export class InstallService {
 
       // Create install record before execution
       const result = await db.run(`
-        INSERT INTO install_data (user_id, ip, passwd_vps, win_ver, passwd_rdp, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO install_data (user_id, ip, ssh_port, auth_type, passwd_vps, ssh_key, win_ver, passwd_rdp, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         userId,
         ip,
-        vpsPassword,
+        sshPort,
+        authType,
+        authType === 'password' ? vpsPassword : null,
+        authType === 'ssh_key' ? sshKey : null,
         winVersion,
         rdpPassword,
         'pending',
@@ -280,35 +290,35 @@ export class InstallService {
   }
 
   /**
-   * Step 5: Check if VPS is online (port 22 SSH)
+   * Step 5: Check if VPS is online (custom SSH port)
    */
-  private static async validateVPSOnline(ip: string): Promise<InstallValidationResult> {
+  private static async validateVPSOnline(ip: string, port: number = 22): Promise<InstallValidationResult> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port: 22, timeout: 7000 });
+      const socket = createConnection({ host: ip, port, timeout: 7000 });
       
       socket.on('connect', () => {
         socket.destroy();
-        logger.info('VPS online validation passed:', { ip });
+        logger.info('VPS online validation passed:', { ip, port });
         resolve({ isValid: true, step: 'vps_online_validation' });
       });
 
       socket.on('timeout', () => {
         socket.destroy();
-        logger.warn('VPS connection timeout:', { ip });
-        resolve({ 
-          isValid: false, 
-          error: `VPS at ${ip} is not responding. Please check if the server is online and SSH is enabled.`, 
-          step: 'vps_online_validation' 
+        logger.warn('VPS connection timeout:', { ip, port });
+        resolve({
+          isValid: false,
+          error: `VPS at ${ip}:${port} is not responding. Please check if the server is online and SSH is accessible on port ${port}.`,
+          step: 'vps_online_validation'
         });
       });
 
       socket.on('error', (error) => {
         socket.destroy();
-        logger.warn('VPS connection error:', { ip, error: error.message });
-        resolve({ 
-          isValid: false, 
-          error: `Cannot connect to VPS at ${ip}. Please verify the IP address and ensure SSH is accessible.`, 
-          step: 'vps_online_validation' 
+        logger.warn('VPS connection error:', { ip, port, error: error.message });
+        resolve({
+          isValid: false,
+          error: `Cannot connect to VPS at ${ip}:${port}. Please verify the IP address, port, and ensure SSH is accessible.`,
+          step: 'vps_online_validation'
         });
       });
     });
@@ -317,36 +327,41 @@ export class InstallService {
   /**
    * Step 6: Validate SSH credentials
    */
-  private static async validateSSHCredentials(ip: string, password: string): Promise<Client | null> {
+  private static async validateSSHCredentials(
+    ip: string,
+    port: number = 22,
+    authType: 'password' | 'ssh_key',
+    password: string,
+    sshKey: string
+  ): Promise<Client | null> {
     return new Promise((resolve) => {
       const client = new Client();
       let connectionTimeout: NodeJS.Timeout;
       
       connectionTimeout = setTimeout(() => {
-        logger.warn('SSH connection timeout:', { ip });
+        logger.warn('SSH connection timeout:', { ip, port, authType });
         client.end();
         resolve(null);
       }, 10000);
       
       client.on('ready', () => {
         clearTimeout(connectionTimeout);
-        logger.info('SSH authentication successful:', { ip });
+        logger.info('SSH authentication successful:', { ip, port, authType });
         resolve(client);
       });
 
       client.on('error', (error) => {
         clearTimeout(connectionTimeout);
-        logger.warn('SSH authentication failed:', { ip, error: error.message });
+        logger.warn('SSH authentication failed:', { ip, port, authType, error: error.message });
         client.end();
         resolve(null);
       });
 
       try {
-        client.connect({
+        const connectOptions: any = {
           host: ip,
-          port: 22,
+          port: port,
           username: 'root',
-          password: password,
           readyTimeout: 15000,
           algorithms: {
             kex: ['diffie-hellman-group14-sha256', 'diffie-hellman-group14-sha1'],
@@ -354,10 +369,19 @@ export class InstallService {
             hmac: ['hmac-sha2-256', 'hmac-sha2-512', 'hmac-sha1'],
             compress: ['none']
           }
-        });
+        };
+
+        if (authType === 'password') {
+          connectOptions.password = password;
+        } else {
+          // SSH key authentication
+          connectOptions.privateKey = sshKey;
+        }
+
+        client.connect(connectOptions);
       } catch (error: any) {
         clearTimeout(connectionTimeout);
-        logger.error('SSH connection setup failed:', { ip, error: error.message });
+        logger.error('SSH connection setup failed:', { ip, port, authType, error: error.message });
         resolve(null);
       }
     });
@@ -1003,13 +1027,13 @@ export class InstallService {
   /**
    * Check if Windows RDP is accessible
    */
-  private static async checkWindowsRDP(ip: string): Promise<boolean> {
+  private static async checkWindowsRDP(ip: string, port: number = 22): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port: 22, timeout: 5000 });
+      const socket = createConnection({ host: ip, port, timeout: 5000 });
       
       socket.on('connect', () => {
         socket.destroy();
-        logger.info('Windows RDP is accessible:', { ip });
+        logger.info('Windows RDP is accessible:', { ip, port });
         resolve(true);
       });
 

@@ -229,7 +229,10 @@ async function createTables(): Promise<void> {
         user_id INTEGER NOT NULL,
         start_time DATETIME DEFAULT '${jakartaTime}',
         ip VARCHAR(45) NOT NULL,
+        ssh_port INTEGER DEFAULT 22,
+        auth_type VARCHAR(20) DEFAULT 'password',
         passwd_vps VARCHAR(255),
+        ssh_key TEXT,
         win_ver VARCHAR(10) NOT NULL,
         passwd_rdp VARCHAR(255),
         status VARCHAR(50) NOT NULL DEFAULT 'pending',
@@ -238,6 +241,33 @@ async function createTables(): Promise<void> {
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       )
     `);
+
+    // Check if ssh_port column exists, if not add it (for existing databases)
+    try {
+      await db.get('SELECT ssh_port FROM install_data LIMIT 1');
+    } catch (error) {
+      // Column doesn't exist, add it
+      logger.info('Adding ssh_port column to install_data table');
+      await db.run('ALTER TABLE install_data ADD COLUMN ssh_port INTEGER DEFAULT 22');
+    }
+
+    // Check if auth_type column exists, if not add it
+    try {
+      await db.get('SELECT auth_type FROM install_data LIMIT 1');
+    } catch (error) {
+      // Column doesn't exist, add it
+      logger.info('Adding auth_type column to install_data table');
+      await db.run('ALTER TABLE install_data ADD COLUMN auth_type VARCHAR(20) DEFAULT "password"');
+    }
+
+    // Check if ssh_key column exists, if not add it
+    try {
+      await db.get('SELECT ssh_key FROM install_data LIMIT 1');
+    } catch (error) {
+      // Column doesn't exist, add it
+      logger.info('Adding ssh_key column to install_data table');
+      await db.run('ALTER TABLE install_data ADD COLUMN ssh_key TEXT');
+    }
     
     // Create basic indexes first
     await db.run('CREATE INDEX IF NOT EXISTS idx_users_email ON users (email)');

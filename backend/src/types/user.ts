@@ -82,9 +82,20 @@ export const installDataSchema = z.object({
     .min(1, 'IP address is required')
     .max(45, 'IP address must be less than 45 characters')
     .regex(/^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/, 'Invalid IPv4 address format'),
+  ssh_port: z.number()
+    .int('SSH port must be an integer')
+    .min(1, 'SSH port must be at least 1')
+    .max(65535, 'SSH port must be at most 65535')
+    .default(22),
+  auth_type: z.enum(['password', 'ssh_key'], {
+    errorMap: () => ({ message: 'Authentication type must be either "password" or "ssh_key"' })
+  }).default('password'),
   passwd_vps: z.string()
-    .min(1, 'VPS password is required')
-    .max(255, 'VPS password must be less than 255 characters'),
+    .max(255, 'VPS password must be less than 255 characters')
+    .optional(),
+  ssh_key: z.string()
+    .max(10000, 'SSH key must be less than 10000 characters')
+    .optional(),
   win_ver: z.string()
     .min(1, 'Windows version is required')
     .max(10, 'Windows version must be less than 10 characters')
@@ -95,6 +106,18 @@ export const installDataSchema = z.object({
     .refine((password) => !password.startsWith('#'), {
       message: 'RDP password cannot start with "#" character'
     }),
+}).refine((data) => {
+  // If auth_type is password, passwd_vps is required
+  if (data.auth_type === 'password' && (!data.passwd_vps || data.passwd_vps.trim() === '')) {
+    return false;
+  }
+  // If auth_type is ssh_key, ssh_key is required
+  if (data.auth_type === 'ssh_key' && (!data.ssh_key || data.ssh_key.trim() === '')) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'VPS password is required when using password authentication, SSH key is required when using SSH key authentication'
 });
 
 // User interfaces
@@ -201,7 +224,10 @@ export interface InstallData {
   user_id: number;
   start_time: string;
   ip: string;
+  ssh_port: number;
+  auth_type: 'password' | 'ssh_key';
   passwd_vps?: string;
+  ssh_key?: string;
   win_ver: string;
   passwd_rdp?: string;
   status: string;
