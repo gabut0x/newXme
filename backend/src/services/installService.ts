@@ -55,6 +55,34 @@ export class InstallService {
     let installId: number | null = null;
 
     try {
+      // Add detailed logging for debugging
+      logger.info('Installation request received with parameters:', {
+        userId,
+        ip,
+        sshPort,
+        authType,
+        winVersion: winVersion || 'UNDEFINED',
+        winVersionType: typeof winVersion,
+        rdpPasswordLength: rdpPassword?.length || 0,
+        vpsPasswordLength: vpsPassword?.length || 0,
+        sshKeyLength: sshKey?.length || 0,
+        timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
+      });
+
+      // Validate required parameters first
+      if (!winVersion || winVersion === 'undefined' || winVersion.trim() === '') {
+        logger.error('Windows version is missing or undefined:', {
+          winVersion,
+          winVersionType: typeof winVersion,
+          userId,
+          ip
+        });
+        return { 
+          success: false, 
+          message: 'Windows version is required. Please select a valid Windows version from the dropdown.' 
+        };
+      }
+
       logger.info('Starting Windows installation process:', {
         userId,
         ip,
@@ -216,6 +244,19 @@ export class InstallService {
    */
   private static async validateWindowsVersion(winVersion: string): Promise<InstallValidationResult> {
     try {
+      // Additional validation for undefined/empty values
+      if (!winVersion || winVersion === 'undefined' || winVersion.trim() === '') {
+        logger.error('Windows version is undefined or empty:', {
+          winVersion,
+          winVersionType: typeof winVersion
+        });
+        return {
+          isValid: false,
+          error: 'Windows version is required. Please select a valid Windows version from the dropdown.',
+          step: 'windows_validation'
+        };
+      }
+
       const db = getDatabase();
       
       logger.info('Validating Windows version:', { winVersion });
@@ -233,7 +274,7 @@ export class InstallService {
         });
         return { 
           isValid: false, 
-          error: `Invalid Windows version '${winVersion}'. Available versions: ${allVersions.map(v => v.slug).join(', ')}`, 
+          error: `Invalid Windows version '${winVersion}'. Please select from available versions: ${allVersions.map(v => `${v.name} (${v.slug})`).join(', ')}`, 
           step: 'windows_validation' 
         };
       }

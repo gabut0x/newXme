@@ -564,12 +564,41 @@ router.post('/install',
 
     const validatedData = req.body;
 
+    // Add detailed logging for debugging the undefined winVersion issue
+    logger.info('Install request received:', {
+      userId: req.user.id,
+      requestBody: req.body,
+      validatedData,
+      winVer: validatedData.win_ver,
+      winVerType: typeof validatedData.win_ver,
+      allFields: Object.keys(validatedData)
+    });
+
+    // Additional validation for win_ver
+    if (!validatedData.win_ver || validatedData.win_ver === 'undefined') {
+      logger.error('Windows version validation failed:', {
+        winVer: validatedData.win_ver,
+        winVerType: typeof validatedData.win_ver,
+        userId: req.user.id,
+        requestBody: req.body
+      });
+      
+      res.status(400).json({
+        success: false,
+        message: 'Windows version is required. Please select a valid Windows version.',
+        error: 'MISSING_WINDOWS_VERSION'
+      } as ApiResponse);
+      return;
+    }
     
     // Process installation with comprehensive validation
     const result = await InstallService.processInstallation(
       req.user.id,
       validatedData.ip,
+      validatedData.ssh_port || 22,
+      validatedData.auth_type || 'password',
       validatedData.passwd_vps || '',
+      validatedData.ssh_key || '',
       validatedData.win_ver,
       validatedData.passwd_rdp || ''
     );

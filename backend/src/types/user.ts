@@ -97,9 +97,12 @@ export const installDataSchema = z.object({
     .max(10000, 'SSH key must be less than 10000 characters')
     .optional(),
   win_ver: z.string()
-    .min(1, 'Windows version is required')
+    .min(1, 'Windows version is required. Please select a Windows version from the dropdown.')
     .max(10, 'Windows version must be less than 10 characters')
-    .regex(/^[a-z0-9-_]+$/, 'Windows version can only contain lowercase letters, numbers, hyphens, and underscores'),
+    .regex(/^[a-z0-9-_]+$/, 'Windows version can only contain lowercase letters, numbers, hyphens, and underscores')
+    .refine((val) => val !== 'undefined' && val !== '', {
+      message: 'Please select a valid Windows version from the dropdown'
+    }),
   passwd_rdp: z.string()
     .min(4, 'RDP password must be at least 4 characters')
     .max(255, 'RDP password must be less than 255 characters')
