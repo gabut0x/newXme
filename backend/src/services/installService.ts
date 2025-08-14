@@ -415,19 +415,62 @@ export class InstallService {
           port: port,
           username: 'root',
           readyTimeout: 15000,
+          keepaliveInterval: 30000,
+          keepaliveCountMax: 3,
           algorithms: {
-            kex: ['diffie-hellman-group14-sha256', 'diffie-hellman-group14-sha1'],
-            cipher: ['aes128-ctr', 'aes192-ctr', 'aes256-ctr'],
-            hmac: ['hmac-sha2-256', 'hmac-sha2-512', 'hmac-sha1'],
+            kex: [
+              'curve25519-sha256',
+              'curve25519-sha256@libssh.org',
+              'ecdh-sha2-nistp256',
+              'ecdh-sha2-nistp384',
+              'ecdh-sha2-nistp521',
+              'diffie-hellman-group14-sha256',
+              'diffie-hellman-group16-sha512',
+              'diffie-hellman-group18-sha512',
+              'diffie-hellman-group14-sha1'
+            ],
+            cipher: [
+              'chacha20-poly1305@openssh.com',
+              'aes256-gcm@openssh.com',
+              'aes128-gcm@openssh.com',
+              'aes256-ctr',
+              'aes192-ctr',
+              'aes128-ctr'
+            ],
+            hmac: [
+              'umac-128-etm@openssh.com',
+              'hmac-sha2-256-etm@openssh.com',
+              'hmac-sha2-512-etm@openssh.com',
+              'hmac-sha2-256',
+              'hmac-sha2-512',
+              'hmac-sha1'
+            ],
             compress: ['none']
           }
         };
 
         if (authType === 'password') {
           connectOptions.password = password;
+          logger.info('Using password authentication for SSH connection');
         } else {
-          // SSH key authentication
-          connectOptions.privateKey = sshKey;
+          // SSH key authentication - parse and validate the key
+          const parsedKey = this.parseSSHKey(sshKey);
+          if (!parsedKey) {
+            logger.error('Failed to parse SSH key:', { 
+              keyLength: sshKey.length,
+              keyStart: sshKey.substring(0, 50),
+              ip, 
+              port 
+            });
+            clearTimeout(connectionTimeout);
+            resolve(null);
+            return;
+          }
+          logger.info('Using SSH key authentication:', {
+            keyLength: parsedKey.length,
+            keyType: this.detectSSHKeyType(parsedKey)
+          });
+          connectOptions.privateKey = parsedKey;
         }
 
         client.connect(connectOptions);
@@ -439,6 +482,128 @@ export class InstallService {
     });
   }
 
+  /**
+   * Parse and validate SSH key format
+   */
+  private static parseSSHKey(rawKey: string): string | null {
+    try {
+      if (!rawKey || typeof rawKey !== 'string') {
+        logger.error('SSH key is empty or not a string');
+        return null;
+      }
+
+      // Remove any extra whitespace and normalize line endings
+      let cleanKey = rawKey.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      
+      logger.info('Processing SSH key:', {
+        originalLength: rawKey.length,
+        cleanedLength: cleanKey.length,
+        startsWithBegin: cleanKey.startsWith('-----BEGIN'),
+        endsWithEnd: cleanKey.includes('-----END'),
+        lineCount: cleanKey.split('\n').length
+      });
+
+      // Check if it's already in proper format
+      if (cleanKey.startsWith('-----BEGIN') && cleanKey.includes('-----END')) {
+        // Validate the key structure
+        const lines = cleanKey.split('\n');
+        const beginLine = lines[0];
+        const endLine = lines[lines.length - 1];
+        
+        // Support multiple key types
+        const supportedKeyTypes = [
+          'OPENSSH PRIVATE KEY',
+          'RSA PRIVATE KEY', 
+          'DSA PRIVATE KEY',
+          'EC PRIVATE KEY',
+          'PRIVATE KEY'
+        ];
+        
+        const isValidKeyType = supportedKeyTypes.some(keyType => 
+          beginLine.includes(keyType) && endLine.includes(keyType)
+        );
+        
+        if (!isValidKeyType) {
+          logger.error('Unsupported SSH key type:', { beginLine, endLine });
+          return null;
+        }
+        
+        // Ensure proper line endings
+        if (!cleanKey.endsWith('\n')) {
+          cleanKey += '\n';
+        }
+        
+        logger.info('SSH key validation successful:', {
+          keyType: beginLine,
+          lineCount: lines.length,
+          hasProperEnding: cleanKey.endsWith('\n')
+        });
+        
+        return cleanKey;
+      }
+      
+      // If it's a single line key (like from copy-paste), try to format it
+      if (cleanKey.includes('-----BEGIN') && cleanKey.includes('-----END')) {
+        // Split by common delimiters and reconstruct
+        let formattedKey = cleanKey;
+        
+        // Handle keys that were pasted as single line
+        formattedKey = formattedKey.replace(/-----BEGIN ([^-]+)-----([^-]+)-----END ([^-]+)-----/g, 
+          (match, beginType, content, endType) => {
+            if (beginType !== endType) {
+              logger.error('SSH key begin/end type mismatch:', { beginType, endType });
+              return match;
+            }
+            
+            // Clean and format the content
+            const cleanContent = content.replace(/\s+/g, '');
+            const lines = [];
+            
+            // Add header
+            lines.push(`-----BEGIN ${beginType}-----`);
+            
+            // Split content into 64-character lines (standard for PEM format)
+            for (let i = 0; i < cleanContent.length; i += 64) {
+              lines.push(cleanContent.substring(i, i + 64));
+            }
+            
+            // Add footer
+            lines.push(`-----END ${endType}-----`);
+            
+            return lines.join('\n');
+          }
+        );
+        
+        if (!formattedKey.endsWith('\n')) {
+          formattedKey += '\n';
+        }
+        
+        logger.info('SSH key reformatted from single line:', {
+          originalLength: cleanKey.length,
+          formattedLength: formattedKey.length,
+          lineCount: formattedKey.split('\n').length
+        });
+        
+        return formattedKey;
+      }
+      
+      logger.error('SSH key does not appear to be in valid PEM format:', {
+        keyStart: cleanKey.substring(0, 100),
+        keyLength: cleanKey.length,
+        hasBegin: cleanKey.includes('-----BEGIN'),
+        hasEnd: cleanKey.includes('-----END')
+      });
+      
+      return null;
+      
+    } catch (error: any) {
+      logger.error('SSH key parsing failed:', {
+        error: error.message,
+        keyLength: rawKey?.length || 0
+      });
+      return null;
+    }
+  }
   /**
    * Step 7: Validate OS support
    */
@@ -1192,6 +1357,23 @@ curl __GZLINK__
     }
   }
 
+  /**
+   * Detect SSH key type from parsed key
+   */
+  private static detectSSHKeyType(sshKey: string): string {
+    if (sshKey.includes('-----BEGIN OPENSSH PRIVATE KEY-----')) {
+      return 'OpenSSH';
+    } else if (sshKey.includes('-----BEGIN RSA PRIVATE KEY-----')) {
+      return 'RSA';
+    } else if (sshKey.includes('-----BEGIN DSA PRIVATE KEY-----')) {
+      return 'DSA';
+    } else if (sshKey.includes('-----BEGIN EC PRIVATE KEY-----')) {
+      return 'EC';
+    } else if (sshKey.includes('-----BEGIN PRIVATE KEY-----')) {
+      return 'PKCS#8';
+    }
+    return 'Unknown';
+  }
   /**
    * Get user's active installations
    */

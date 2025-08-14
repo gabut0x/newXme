@@ -27,6 +27,7 @@ import { tripayService } from '../services/tripayService.js';
 import { NotificationService } from '../services/notificationService.js';
 import { InstallService } from '../services/installService.js';
 import { DatabaseSecurity } from '../utils/dbSecurity.js';
+import { ValidationUtils } from '../utils/validation.js';
 import { DateUtils } from '../utils/dateUtils.js';
 import { logger } from '../utils/logger.js';
 
@@ -589,6 +590,34 @@ router.post('/install',
         error: 'MISSING_WINDOWS_VERSION'
       } as ApiResponse);
       return;
+    }
+
+    // Additional SSH key validation if using SSH key authentication
+    if (validatedData.auth_type === 'ssh_key' && validatedData.ssh_key) {
+      const sshKeyValidation = ValidationUtils.validateSSHPrivateKey(validatedData.ssh_key);
+      
+      if (!sshKeyValidation.isValid) {
+        logger.error('SSH key validation failed:', {
+          userId: req.user.id,
+          errors: sshKeyValidation.errors,
+          keyLength: validatedData.ssh_key.length,
+          keyStart: validatedData.ssh_key.substring(0, 50)
+        });
+        
+        res.status(400).json({
+          success: false,
+          message: `SSH key validation failed: ${sshKeyValidation.errors.join(', ')}`,
+          error: 'INVALID_SSH_KEY',
+          data: { errors: sshKeyValidation.errors }
+        } as ApiResponse);
+        return;
+      }
+      
+      logger.info('SSH key validation passed:', {
+        userId: req.user.id,
+        keyType: sshKeyValidation.keyType,
+        keyLength: validatedData.ssh_key.length
+      });
     }
     
     // Process installation with comprehensive validation

@@ -189,6 +189,108 @@ export class ValidationUtils {
   }
 
   /**
+   * Validate SSH private key format and content
+   */
+  static validateSSHPrivateKey(sshKey: string): { isValid: boolean; errors: string[]; keyType?: string } {
+    const errors: string[] = [];
+    
+    if (!sshKey || typeof sshKey !== 'string') {
+      errors.push('SSH key is required');
+      return { isValid: false, errors };
+    }
+
+    const trimmedKey = sshKey.trim();
+    
+    if (trimmedKey.length === 0) {
+      errors.push('SSH key cannot be empty');
+      return { isValid: false, errors };
+    }
+
+    // Check for PEM format headers and footers
+    if (!trimmedKey.includes('-----BEGIN') || !trimmedKey.includes('-----END')) {
+      errors.push('SSH key must be in PEM format with -----BEGIN and -----END markers');
+      return { isValid: false, errors };
+    }
+
+    // Supported private key types
+    const supportedKeyTypes = [
+      'OPENSSH PRIVATE KEY',
+      'RSA PRIVATE KEY',
+      'DSA PRIVATE KEY',
+      'EC PRIVATE KEY',
+      'PRIVATE KEY' // PKCS#8 format
+    ];
+
+    let detectedKeyType: string | null = null;
+    
+    for (const keyType of supportedKeyTypes) {
+      if (trimmedKey.includes(`-----BEGIN ${keyType}-----`) && 
+          trimmedKey.includes(`-----END ${keyType}-----`)) {
+        detectedKeyType = keyType;
+        break;
+      }
+    }
+
+    if (!detectedKeyType) {
+      errors.push(`Unsupported SSH key type. Supported types: ${supportedKeyTypes.join(', ')}`);
+      return { isValid: false, errors };
+    }
+
+    // Validate key structure
+    const lines = trimmedKey.split('\n');
+    
+    if (lines.length < 3) {
+      errors.push('SSH key appears to be incomplete or malformed');
+      return { isValid: false, errors };
+    }
+
+    const beginLine = lines[0].trim();
+    const endLine = lines[lines.length - 1].trim();
+    
+    if (!beginLine.startsWith('-----BEGIN') || !endLine.startsWith('-----END')) {
+      errors.push('SSH key must start with -----BEGIN and end with -----END');
+      return { isValid: false, errors };
+    }
+
+    // Extract key type from begin/end lines
+    const beginMatch = beginLine.match(/-----BEGIN (.+)-----/);
+    const endMatch = endLine.match(/-----END (.+)-----/);
+    
+    if (!beginMatch || !endMatch || beginMatch[1] !== endMatch[1]) {
+      errors.push('SSH key begin and end markers do not match');
+      return { isValid: false, errors };
+    }
+
+    // Validate base64 content (skip header/footer lines)
+    const contentLines = lines.slice(1, -1);
+    const base64Content = contentLines.join('');
+    
+    // Basic base64 validation
+    const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+    if (!base64Regex.test(base64Content)) {
+      errors.push('SSH key contains invalid base64 content');
+      return { isValid: false, errors };
+    }
+
+    // Check minimum content length (very basic check)
+    if (base64Content.length < 100) {
+      errors.push('SSH key appears to be too short or incomplete');
+      return { isValid: false, errors };
+    }
+
+    logger.info('SSH key validation successful:', {
+      keyType: detectedKeyType,
+      lineCount: lines.length,
+      contentLength: base64Content.length
+    });
+
+    return {
+      isValid: true,
+      errors: [],
+      keyType: detectedKeyType
+    };
+  }
+  /**
    * Validate numeric ID parameter
    */
   static validateId(id: any): number | null {

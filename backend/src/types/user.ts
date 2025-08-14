@@ -94,7 +94,34 @@ export const installDataSchema = z.object({
     .max(255, 'VPS password must be less than 255 characters')
     .optional(),
   ssh_key: z.string()
-    .max(10000, 'SSH key must be less than 10000 characters')
+    .max(20000, 'SSH key must be less than 20000 characters')
+    .refine((key) => {
+      if (!key) return true; // Optional field
+      
+      // Basic SSH key format validation
+      const trimmedKey = key.trim();
+      
+      // Check for PEM format
+      if (trimmedKey.includes('-----BEGIN') && trimmedKey.includes('-----END')) {
+        // Validate supported key types
+        const supportedTypes = [
+          'OPENSSH PRIVATE KEY',
+          'RSA PRIVATE KEY',
+          'DSA PRIVATE KEY', 
+          'EC PRIVATE KEY',
+          'PRIVATE KEY'
+        ];
+        
+        return supportedTypes.some(type => 
+          trimmedKey.includes(`-----BEGIN ${type}-----`) && 
+          trimmedKey.includes(`-----END ${type}-----`)
+        );
+      }
+      
+      return false;
+    }, {
+      message: 'SSH key must be in valid PEM format (-----BEGIN ... -----END). Supported types: OpenSSH, RSA, DSA, EC, or PKCS#8 private keys.'
+    })
     .optional(),
   win_ver: z.string()
     .min(1, 'Windows version is required. Please select a Windows version from the dropdown.')
@@ -120,7 +147,8 @@ export const installDataSchema = z.object({
   }
   return true;
 }, {
-  message: 'VPS password is required when using password authentication, SSH key is required when using SSH key authentication'
+  message: 'VPS password is required when using password authentication, SSH private key is required when using SSH key authentication',
+  path: ['auth_type']
 });
 
 // User interfaces
