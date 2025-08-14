@@ -1418,13 +1418,7 @@ username:s:Administrator`;
                 </div>
 
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Installation Details</CardTitle>
-                    <CardDescription>
-                      Fill in the details for your Windows installation
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
+                  <CardContent className='pt-2'>
                     {dashboardData.stats.quota <= 0 ? (
                       <Alert>
                         <div className="flex items-start space-x-3">
@@ -1444,14 +1438,20 @@ username:s:Administrator`;
                     ) : (
                       <form onSubmit={handleSubmit(onInstallSubmit)} className="space-y-6">
                         {/* VPS Connection Details */}
-                        <div className="space-y-4">
-                          <h3 className="text-lg font-semibold">VPS Connection Details</h3>
+                        <div className="space-y-6">
+                          <div>
+                            <h3 className="text-lg font-semibold text-foreground">VPS Connection Details</h3>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              Configure your VPS connection settings
+                            </p>
+                          </div>
                           
-                          <div className="space-y-4">
-                            {/* VPS IP Address and Authentication Method in one row */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              <div className="space-y-2">
-                                <Label htmlFor="ip">VPS IP Address *</Label>
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* VPS IP Address */}
+                            <div className="space-y-3">
+                              <Label htmlFor="ip" className="text-sm font-medium">
+                                VPS IP Address *
+                              </Label>
                                 <Input
                                   id="ip"
                                   placeholder="192.168.1.100 or 192.168.1.100:2222"
@@ -1466,25 +1466,28 @@ username:s:Administrator`;
                                 </p>
                               </div>
 
-                              <div className="space-y-2">
-                                <Label>Authentication Method *</Label>
+                            {/* Authentication Method */}
+                            <div className="space-y-3">
+                              <Label className="text-sm font-medium">Authentication Method *</Label>
                                 <RadioGroup
                                   defaultValue="password"
                                   onValueChange={(value: 'password' | 'ssh_key') => {
                                     setAuthType(value);
                                     setValue('auth_type', value);
                                   }}
-                                  className="space-y-3"
+                                  className="space-y-4"
                                 >
-                                  {/* Password Authentication Row */}
-                                  <div className="flex items-start space-x-3">
-                                    <div className="flex items-center space-x-2 pt-2.5">
+                                  {/* Password Authentication */}
+                                  <div className="space-y-3">
+                                    <div className="flex items-center space-x-2">
                                       <RadioGroupItem value="password" id="auth-password" />
-                                      <Label htmlFor="auth-password" className="text-sm min-w-[70px]">Password</Label>
+                                      <Label htmlFor="auth-password" className="text-sm font-medium">
+                                        Password Authentication
+                                      </Label>
                                     </div>
-                                    <div className="flex-1">
-                                      {(watchedAuthType === 'password') && (
-                                        <div className="space-y-2">
+                                    
+                                    {watchedAuthType === 'password' && (
+                                      <div className="ml-6 space-y-2">
                                           <div className="relative">
                                             <Input
                                               id="passwd_vps"
@@ -1513,20 +1516,21 @@ username:s:Administrator`;
                                           <p className="text-xs text-muted-foreground">
                                             Enter your VPS root password
                                           </p>
-                                        </div>
-                                      )}
-                                    </div>
+                                      </div>
+                                    )}
                                   </div>
 
-                                  {/* SSH Key Authentication Row */}
-                                  <div className="flex items-start space-x-3">
-                                    <div className="flex items-center space-x-2 pt-2.5">
+                                  {/* SSH Key Authentication */}
+                                  <div className="space-y-3">
+                                    <div className="flex items-center space-x-2">
                                       <RadioGroupItem value="ssh_key" id="auth-ssh-key" />
-                                      <Label htmlFor="auth-ssh-key" className="text-sm min-w-[70px]">SSH Key</Label>
+                                      <Label htmlFor="auth-ssh-key" className="text-sm font-medium">
+                                        SSH Key Authentication
+                                      </Label>
                                     </div>
-                                    <div className="flex-1">
-                                      {(watchedAuthType === 'ssh_key') && (
-                                        <div className="space-y-2">
+                                    
+                                    {watchedAuthType === 'ssh_key' && (
+                                      <div className="ml-6 space-y-2">
                                           <Input
                                             id="ssh_key_file"
                                             type="file"
@@ -1549,24 +1553,29 @@ username:s:Administrator`;
                                           <p className="text-xs text-muted-foreground">
                                             Upload your SSH private key file. Supports OpenSSH, RSA, PEM, PPK formats.
                                           </p>
-                                        </div>
-                                      )}
-                                    </div>
+                                      </div>
+                                    )}
                                   </div>
                                 </RadioGroup>
                               </div>
-                            </div>
                           </div>
                         </div>
 
                         {/* Windows Configuration */}
-                        <div className="space-y-4">
-                          <h3 className="text-lg font-semibold">Windows Configuration</h3>
+                        <div className="space-y-6">
+                          <div>
+                            <h3 className="text-lg font-semibold text-foreground">Windows Configuration</h3>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              Configure your Windows installation settings
+                            </p>
+                          </div>
                           
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-                            <div className="space-y-2">
-                              <Label htmlFor="win_ver">Windows Version *</Label>
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* Windows Version */}
+                            <div className="space-y-3">
+                              <Label htmlFor="win_ver" className="text-sm font-medium">
+                                Windows Version *
+                              </Label>
                               <Select onValueChange={(value) => setValue('win_ver', value)}>
                                 <SelectTrigger className={errors.win_ver ? 'border-destructive' : ''}>
                                   <SelectValue placeholder="Select Windows version" />
@@ -1582,10 +1591,16 @@ username:s:Administrator`;
                               {errors.win_ver && (
                                 <p className="text-sm text-destructive">{errors.win_ver.message}</p>
                               )}
+                              <p className="text-xs text-muted-foreground">
+                                Choose the Windows version you want to install
+                              </p>
                             </div>
 
-                            <div className="space-y-2">
-                              <Label htmlFor="passwd_rdp">RDP Password *</Label>
+                            {/* RDP Password */}
+                            <div className="space-y-3">
+                              <Label htmlFor="passwd_rdp" className="text-sm font-medium">
+                                RDP Password *
+                              </Label>
                               <div className="relative">
                                 <Input
                                   id="passwd_rdp"
@@ -1612,29 +1627,33 @@ username:s:Administrator`;
                                 <p className="text-sm text-destructive">{errors.passwd_rdp.message}</p>
                               )}
                               <p className="text-xs text-muted-foreground">
-                                Cannot start with #
+                                Password for Windows RDP access. Cannot start with #
                               </p>
                             </div>
                           </div>
                         </div>
 
-                        <Button 
-                          type="submit" 
-                          className="w-full"
-                          disabled={isSubmitting || dashboardData.stats.quota <= 0}
-                        >
-                          {isSubmitting ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Starting Installation...
-                            </>
-                          ) : (
-                            <>
-                              <Plus className="mr-2 h-4 w-4" />
-                              Start Installation (1 Quota)
-                            </>
-                          )}
-                        </Button>
+                        {/* Submit Button */}
+                        <div className="pt-4">
+                          <Button 
+                            type="submit" 
+                            className="w-full"
+                            disabled={isSubmitting || dashboardData.stats.quota <= 0}
+                            size="lg"
+                          >
+                            {isSubmitting ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Starting Installation...
+                              </>
+                            ) : (
+                              <>
+                                <Plus className="mr-2 h-4 w-4" />
+                                Start Installation (1 Quota)
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       </form>
                     )}
                   </CardContent>
