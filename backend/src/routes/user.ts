@@ -594,14 +594,17 @@ router.post('/install',
 
     // Additional SSH key validation if using SSH key authentication
     if (validatedData.auth_type === 'ssh_key' && validatedData.ssh_key) {
-      const sshKeyValidation = ValidationUtils.validateSSHPrivateKey(validatedData.ssh_key);
+      // Use the enhanced SSH key validation from InstallService
+      const { InstallService } = await import('../services/installService.js');
+      const sshKeyValidation = (InstallService as any).validateSSHKeyAdvanced(validatedData.ssh_key);
       
       if (!sshKeyValidation.isValid) {
         logger.error('SSH key validation failed:', {
           userId: req.user.id,
           errors: sshKeyValidation.errors,
           keyLength: validatedData.ssh_key.length,
-          keyStart: validatedData.ssh_key.substring(0, 50)
+          keyStart: validatedData.ssh_key.substring(0, 50),
+          keyType: sshKeyValidation.keyType
         });
         
         res.status(400).json({
@@ -616,7 +619,8 @@ router.post('/install',
       logger.info('SSH key validation passed:', {
         userId: req.user.id,
         keyType: sshKeyValidation.keyType,
-        keyLength: validatedData.ssh_key.length
+        keyLength: validatedData.ssh_key.length,
+        validationMethod: 'enhanced'
       });
     }
     

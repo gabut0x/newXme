@@ -212,13 +212,14 @@ export class ValidationUtils {
       return { isValid: false, errors };
     }
 
-    // Supported private key types
+    // Supported private key types - tambahkan ED25519
     const supportedKeyTypes = [
       'OPENSSH PRIVATE KEY',
       'RSA PRIVATE KEY',
       'DSA PRIVATE KEY',
       'EC PRIVATE KEY',
-      'PRIVATE KEY' // PKCS#8 format
+      'PRIVATE KEY', // PKCS#8 format
+      'ED25519 PRIVATE KEY' // ED25519 format
     ];
 
     let detectedKeyType: string | null = null;
@@ -232,7 +233,7 @@ export class ValidationUtils {
     }
 
     if (!detectedKeyType) {
-      errors.push(`Unsupported SSH key type. Supported types: ${supportedKeyTypes.join(', ')}`);
+      errors.push(`Unsupported SSH key type. Supported types: OpenSSH, RSA, DSA, EC, ED25519, and PKCS#8 private keys`);
       return { isValid: false, errors };
     }
 
@@ -240,7 +241,7 @@ export class ValidationUtils {
     const lines = trimmedKey.split('\n');
     
     if (lines.length < 3) {
-      errors.push('SSH key appears to be incomplete or malformed');
+      errors.push('SSH key appears to be incomplete or malformed - minimum 3 lines required');
       return { isValid: false, errors };
     }
 
@@ -261,27 +262,63 @@ export class ValidationUtils {
       return { isValid: false, errors };
     }
 
-    // Validate base64 content (skip header/footer lines)
+    // Validate base64 content (skip header/footer lines and any metadata lines)
     const contentLines = lines.slice(1, -1);
+    
+    // Filter out metadata lines (lines that don't contain base64 data)
+    const base64Lines = contentLines.filter(line => {
+      const trimmed = line.trim();
+      // Skip empty lines and metadata lines (like "Proc-Type:" or "DEK-Info:")
+      return trimmed.length > 0 && 
+             !trimmed.startsWith('Proc-Type:') && 
+             !trimmed.startsWith('DEK-Info:') &&
+             !trimmed.includes(':');
+    });
+    
     const base64Content = contentLines.join('');
     
-    // Basic base64 validation
+    // Basic base64 validation - lebih fleksibel untuk berbagai format
     const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
-    if (!base64Regex.test(base64Content)) {
+    const base64ContentClean = base64Content.replace(/\s/g, ''); // Remove all whitespace
+    
+    if (base64ContentClean.length > 0 && !base64Regex.test(base64ContentClean)) {
       errors.push('SSH key contains invalid base64 content');
       return { isValid: false, errors };
     }
 
-    // Check minimum content length (very basic check)
-    if (base64Content.length < 100) {
-      errors.push('SSH key appears to be too short or incomplete');
+    // Check minimum content length - lebih fleksibel untuk ED25519 (lebih pendek dari RSA)
+    if (base64ContentClean.length < 50) {
+      errors.push('SSH key appears to be too short or incomplete - minimum 50 base64 characters required');
       return { isValid: false, errors };
+    }
+    
+    // Specific validation for different key types
+    if (detectedKeyType === 'ED25519 PRIVATE KEY') {
+      // ED25519 keys are typically shorter than RSA keys
+      if (base64ContentClean.length < 50 || base64ContentClean.length > 200) {
+        errors.push('ED25519 private key length appears invalid (expected 50-200 base64 characters)');
+        return { isValid: false, errors };
+      }
+    } else if (detectedKeyType === 'RSA PRIVATE KEY') {
+      // RSA keys are typically longer
+      if (base64ContentClean.length < 200) {
+        errors.push('RSA private key appears too short (expected at least 200 base64 characters)');
+        return { isValid: false, errors };
+      }
+    } else if (detectedKeyType === 'OPENSSH PRIVATE KEY') {
+      // OpenSSH format can contain both RSA and ED25519
+      if (base64ContentClean.length < 100) {
+        errors.push('OpenSSH private key appears too short (expected at least 100 base64 characters)');
+        return { isValid: false, errors };
+      }
     }
 
     logger.info('SSH key validation successful:', {
       keyType: detectedKeyType,
       lineCount: lines.length,
-      contentLength: base64Content.length
+      contentLength: base64ContentClean.length,
+      originalContentLength: base64Content.length,
+      filteredLines: base64Lines.length
     });
 
     return {

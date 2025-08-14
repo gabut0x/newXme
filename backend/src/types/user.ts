@@ -103,13 +103,14 @@ export const installDataSchema = z.object({
       
       // Check for PEM format
       if (trimmedKey.includes('-----BEGIN') && trimmedKey.includes('-----END')) {
-        // Validate supported key types
+        // Validate supported key types - tambahkan ED25519
         const supportedTypes = [
           'OPENSSH PRIVATE KEY',
           'RSA PRIVATE KEY',
           'DSA PRIVATE KEY', 
           'EC PRIVATE KEY',
-          'PRIVATE KEY'
+          'PRIVATE KEY',
+          'ED25519 PRIVATE KEY'
         ];
         
         return supportedTypes.some(type => 
@@ -120,7 +121,7 @@ export const installDataSchema = z.object({
       
       return false;
     }, {
-      message: 'SSH key must be in valid PEM format (-----BEGIN ... -----END). Supported types: OpenSSH, RSA, DSA, EC, or PKCS#8 private keys.'
+      message: 'SSH key must be in valid PEM format (-----BEGIN ... -----END). Supported types: OpenSSH, RSA, DSA, EC, ED25519, or PKCS#8 private keys.'
     })
     .optional(),
   win_ver: z.string()
