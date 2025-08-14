@@ -141,10 +141,7 @@ export interface InstallData {
   user_id: number;
   start_time: string;
   ip: string;
-  ssh_port: number;
-  auth_type: 'password' | 'ssh_key';
   passwd_vps?: string;
-  ssh_key?: string;
   win_ver: string;
   passwd_rdp?: string;
   status: string;
@@ -168,10 +165,7 @@ export interface CreateProductRequest {
 
 export interface CreateInstallRequest {
   ip: string;
-  ssh_port?: number;
-  auth_type?: 'password' | 'ssh_key';
   passwd_vps?: string;
-  ssh_key?: string;
   win_ver: string;
   passwd_rdp?: string;
 }
@@ -410,36 +404,6 @@ class ApiService {
   }
 
   async createInstall(data: CreateInstallRequest): Promise<AxiosResponse<ApiResponse<InstallData>>> {
-    // Add validation and logging before sending request
-    console.log('🚀 Creating install request:', {
-      ...data,
-      passwd_vps: data.passwd_vps ? '[HIDDEN]' : undefined,
-      ssh_key: data.ssh_key ? '[HIDDEN]' : undefined,
-      passwd_rdp: data.passwd_rdp ? '[HIDDEN]' : undefined
-    });
-    
-    // Validate required fields on frontend
-    if (!data.win_ver || data.win_ver === 'undefined' || data.win_ver.trim() === '') {
-      throw new Error('Windows version is required. Please select a Windows version from the dropdown.');
-    }
-    
-    if (!data.ip || data.ip.trim() === '') {
-      throw new Error('IP address is required.');
-    }
-    
-    if (!data.passwd_rdp || data.passwd_rdp.trim() === '') {
-      throw new Error('RDP password is required.');
-    }
-    
-    // Validate auth-specific requirements
-    if (data.auth_type === 'password' && (!data.passwd_vps || data.passwd_vps.trim() === '')) {
-      throw new Error('VPS password is required when using password authentication.');
-    }
-    
-    if (data.auth_type === 'ssh_key' && (!data.ssh_key || data.ssh_key.trim() === '')) {
-      throw new Error('SSH key is required when using SSH key authentication.');
-    }
-
     return this.api.post('/user/install', data);
   }
 

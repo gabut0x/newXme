@@ -39,262 +39,12 @@ export class InstallService {
   }
 
   /**
-   * Enhanced validation for installation input with better SSH key support
-   */
-  private static async validateInstallationInput(data: {
-    userId: number;
-    ip: string;
-    sshPort: number;
-    authType: 'password' | 'ssh_key';
-    passwdVps: string;
-    sshKey: string;
-    winVer: string;
-    passwdRdp: string;
-  }): Promise<{ isValid: boolean; errors: string[] }> {
-    const errors: string[] = [];
-
-    // Validate user ID
-    if (!Number.isInteger(data.userId) || data.userId <= 0) {
-      errors.push('Invalid user ID');
-    }
-
-    // Validate IP address
-    if (!this.validateIPv4(data.ip).isValid) {
-      errors.push('Invalid IPv4 address format');
-    }
-
-    // Validate SSH port
-    if (!Number.isInteger(data.sshPort) || data.sshPort < 1 || data.sshPort > 65535) {
-      errors.push('SSH port must be between 1 and 65535');
-    }
-
-    // Validate Windows version
-    if (!data.winVer || data.winVer.trim() === '' || data.winVer === 'undefined') {
-      errors.push('Windows version is required');
-    } else {
-      // Check if Windows version exists in database
-      const db = getDatabase();
-      const windowsVersion = await db.get('SELECT id FROM windows_versions WHERE slug = ?', [data.winVer]);
-      if (!windowsVersion) {
-        errors.push('Invalid Windows version selected');
-      }
-    }
-
-    // Validate RDP password
-    if (!data.passwdRdp || data.passwdRdp.trim() === '') {
-      errors.push('RDP password is required');
-    } else if (data.passwdRdp.startsWith('#')) {
-      errors.push('RDP password cannot start with "#" character');
-    }
-
-    // Validate authentication method specific requirements
-    if (data.authType === 'password') {
-      if (!data.passwdVps || data.passwdVps.trim() === '') {
-        errors.push('VPS password is required when using password authentication');
-      }
-    } else if (data.authType === 'ssh_key') {
-      if (!data.sshKey || data.sshKey.trim() === '') {
-        errors.push('SSH private key is required when using SSH key authentication');
-      } else {
-        // Enhanced SSH key validation
-        const sshKeyValidation = this.validateSSHKeyAdvanced(data.sshKey);
-        if (!sshKeyValidation.isValid) {
-          errors.push(...sshKeyValidation.errors);
-        } else {
-          logger.info('SSH key validation passed:', {
-            keyType: sshKeyValidation.keyType,
-            keyLength: data.sshKey.length,
-            userId: data.userId
-          });
-        }
-      }
-    }
-
-    return { isValid: errors.length === 0, errors };
-  }
-
-  /**
-   * Advanced SSH key validation with better support for different formats
-   */
-  private static validateSSHKeyAdvanced(sshKey: string): { isValid: boolean; errors: string[]; keyType?: string } {
-    const errors: string[] = [];
-    
-    if (!sshKey || typeof sshKey !== 'string') {
-      errors.push('SSH key is required');
-      return { isValid: false, errors };
-    }
-
-    const trimmedKey = sshKey.trim();
-    
-    if (trimmedKey.length === 0) {
-      errors.push('SSH key cannot be empty');
-      return { isValid: false, errors };
-    }
-
-    // Check for PEM format headers and footers
-    if (!trimmedKey.includes('-----BEGIN') || !trimmedKey.includes('-----END')) {
-      errors.push('SSH key must be in PEM format with -----BEGIN and -----END markers');
-      return { isValid: false, errors };
-    }
-
-    // Enhanced supported private key types
-    const supportedKeyTypes = [
-      'OPENSSH PRIVATE KEY',    // Modern OpenSSH format (supports RSA, ED25519, ECDSA)
-      'RSA PRIVATE KEY',        // Traditional RSA format
-      'DSA PRIVATE KEY',        // DSA format (deprecated but still supported)
-      'EC PRIVATE KEY',         // Elliptic Curve format
-      'PRIVATE KEY',            // PKCS#8 format
-      'ED25519 PRIVATE KEY'     // ED25519 specific format
-    ];
-
-    let detectedKeyType: string | null = null;
-    
-    // Check for supported key types
-    for (const keyType of supportedKeyTypes) {
-      if (trimmedKey.includes(`-----BEGIN ${keyType}-----`) && 
-          trimmedKey.includes(`-----END ${keyType}-----`)) {
-        detectedKeyType = keyType;
-        break;
-      }
-    }
-
-    if (!detectedKeyType) {
-      // Log the actual headers found for debugging
-      const beginMatch = trimmedKey.match(/-----BEGIN ([^-]+)-----/);
-      const endMatch = trimmedKey.match(/-----END ([^-]+)-----/);
-      
-      logger.warn('Unsupported SSH key type detected:', {
-        foundBeginType: beginMatch?.[1],
-        foundEndType: endMatch?.[1],
-        supportedTypes: supportedKeyTypes,
-        keyPreview: trimmedKey.substring(0, 100) + '...'
-      });
-      
-      errors.push(`Unsupported SSH key type. Found: ${beginMatch?.[1] || 'unknown'}. Supported types: OpenSSH, RSA, DSA, EC, ED25519, and PKCS#8 private keys`);
-      return { isValid: false, errors };
-    }
-
-    // Validate key structure
-    const lines = trimmedKey.split(/\r?\n/); // Handle both \n and \r\n line endings
-    
-    if (lines.length < 3) {
-      errors.push(`SSH key appears to be incomplete - found ${lines.length} lines, minimum 3 required`);
-      return { isValid: false, errors };
-    }
-
-    const beginLine = lines[0].trim();
-    const endLine = lines[lines.length - 1].trim();
-    
-    if (!beginLine.startsWith('-----BEGIN') || !endLine.startsWith('-----END')) {
-      errors.push('SSH key must start with -----BEGIN and end with -----END');
-      return { isValid: false, errors };
-    }
-
-    // Extract and validate key type from begin/end lines
-    const beginMatch = beginLine.match(/-----BEGIN (.+)-----/);
-    const endMatch = endLine.match(/-----END (.+)-----/);
-    
-    if (!beginMatch || !endMatch || beginMatch[1] !== endMatch[1]) {
-      errors.push(`SSH key begin and end markers do not match: BEGIN(${beginMatch?.[1]}) vs END(${endMatch?.[1]})`);
-      return { isValid: false, errors };
-    }
-
-    // Validate base64 content (skip header/footer lines and metadata)
-    const contentLines = lines.slice(1, -1);
-    
-    // Filter out metadata lines and empty lines
-    const base64Lines = contentLines.filter(line => {
-      const trimmed = line.trim();
-      // Skip empty lines and metadata lines
-      return trimmed.length > 0 && 
-             !trimmed.startsWith('Proc-Type:') && 
-             !trimmed.startsWith('DEK-Info:') &&
-             !trimmed.includes(': ') && // Skip any line with ": " (metadata pattern)
-             !/^[A-Za-z-]+:/.test(trimmed); // Skip lines starting with "Word:" pattern
-    });
-    
-    const base64Content = base64Lines.join('');
-    
-    // Enhanced base64 validation
-    const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
-    const base64ContentClean = base64Content.replace(/\s/g, ''); // Remove all whitespace
-    
-    if (base64ContentClean.length === 0) {
-      errors.push('SSH key contains no valid base64 content');
-      return { isValid: false, errors };
-    }
-    
-    if (!base64Regex.test(base64ContentClean)) {
-      errors.push('SSH key contains invalid base64 content');
-      return { isValid: false, errors };
-    }
-
-    // Type-specific validation with more realistic length checks
-    if (detectedKeyType === 'ED25519 PRIVATE KEY') {
-      // ED25519 keys are typically 64 bytes (88 base64 chars) + some overhead
-      if (base64ContentClean.length < 80 || base64ContentClean.length > 300) {
-        errors.push(`ED25519 private key length appears invalid: ${base64ContentClean.length} characters (expected 80-300)`);
-        return { isValid: false, errors };
-      }
-    } else if (detectedKeyType === 'RSA PRIVATE KEY') {
-      // RSA keys vary by size: 2048-bit ≈ 1600+ chars, 4096-bit ≈ 3200+ chars
-      if (base64ContentClean.length < 1000) {
-        errors.push(`RSA private key appears too short: ${base64ContentClean.length} characters (expected at least 1000 for 2048-bit key)`);
-        return { isValid: false, errors };
-      }
-    } else if (detectedKeyType === 'OPENSSH PRIVATE KEY') {
-      // OpenSSH format can contain various key types
-      if (base64ContentClean.length < 100) {
-        errors.push(`OpenSSH private key appears too short: ${base64ContentClean.length} characters (expected at least 100)`);
-        return { isValid: false, errors };
-      }
-    } else if (detectedKeyType === 'EC PRIVATE KEY') {
-      // EC keys are typically smaller than RSA but larger than ED25519
-      if (base64ContentClean.length < 100 || base64ContentClean.length > 1000) {
-        errors.push(`EC private key length appears invalid: ${base64ContentClean.length} characters (expected 100-1000)`);
-        return { isValid: false, errors };
-      }
-    }
-
-    // Additional security validation
-    try {
-      // Try to decode base64 to ensure it's valid
-      const decoded = Buffer.from(base64ContentClean, 'base64');
-      if (decoded.length === 0) {
-        errors.push('SSH key base64 content is empty after decoding');
-        return { isValid: false, errors };
-      }
-    } catch (decodeError) {
-      errors.push('SSH key contains invalid base64 encoding');
-      return { isValid: false, errors };
-    }
-
-    logger.info('Advanced SSH key validation successful:', {
-      keyType: detectedKeyType,
-      totalLines: lines.length,
-      contentLines: contentLines.length,
-      base64Lines: base64Lines.length,
-      base64Length: base64ContentClean.length,
-      originalLength: sshKey.length
-    });
-
-    return {
-      isValid: true,
-      errors: [],
-      keyType: detectedKeyType
-    };
-  }
-
-  /**
    * Main installation process with comprehensive validation
    */
   static async processInstallation(
     userId: number,
     ip: string,
-    sshPort: number,
-    authType: 'password' | 'ssh_key',
     vpsPassword: string,
-    sshKey: string,
     winVersion: string,
     rdpPassword: string
   ): Promise<{ success: boolean; message: string; installId?: number }> {
@@ -302,49 +52,9 @@ export class InstallService {
     let installId: number | null = null;
 
     try {
-      // Add detailed logging for debugging
-      logger.info('Installation request received with parameters:', {
-        userId,
-        ip,
-        sshPort,
-        authType,
-        winVersion: winVersion || 'UNDEFINED',
-        winVersionType: typeof winVersion,
-        rdpPasswordLength: rdpPassword?.length || 0,
-        vpsPasswordLength: vpsPassword?.length || 0,
-        sshKeyLength: sshKey?.length || 0,
-        timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
-      });
-
-      // Use the enhanced validation method
-      const validationResult = await this.validateInstallationInput({
-        userId,
-        ip,
-        sshPort,
-        authType,
-        passwdVps: vpsPassword,
-        sshKey,
-        winVer: winVersion,
-        passwdRdp: rdpPassword
-      });
-
-      if (!validationResult.isValid) {
-        logger.error('Installation validation failed:', {
-          userId,
-          ip,
-          errors: validationResult.errors
-        });
-        return {
-          success: false,
-          message: validationResult.errors.join('; ')
-        };
-      }
-
       logger.info('Starting Windows installation process:', {
         userId,
         ip,
-        sshPort,
-        authType,
         winVersion,
         timestamp: DateUtils.formatJakarta(DateUtils.now()) + ' WIB'
       });
@@ -355,21 +65,37 @@ export class InstallService {
         return { success: false, message: quotaValidation.error! };
       }
 
-      // Step 2: Check if VPS is online
-      const onlineValidation = await this.validateVPSOnline(ip, sshPort);
+      // Step 2: Validate Windows version
+      const winValidation = await this.validateWindowsVersion(winVersion);
+      if (!winValidation.isValid) {
+        return { success: false, message: winValidation.error! };
+      }
+
+      // Step 3: Validate RDP password
+      const rdpValidation = this.validateRdpPassword(rdpPassword);
+      if (!rdpValidation.isValid) {
+        return { success: false, message: rdpValidation.error! };
+      }
+
+      // Step 4: Validate IPv4 address
+      const ipValidation = this.validateIPv4(ip);
+      if (!ipValidation.isValid) {
+        return { success: false, message: ipValidation.error! };
+      }
+
+      // Step 5: Check if VPS is online
+      const onlineValidation = await this.validateVPSOnline(ip);
       if (!onlineValidation.isValid) {
         return { success: false, message: onlineValidation.error! };
       }
 
-      // Step 3: Validate SSH credentials
-      const sshClient = await this.validateSSHCredentials(ip, sshPort, authType, vpsPassword, sshKey);
+      // Step 6: Validate SSH credentials
+      const sshClient = await this.validateSSHCredentials(ip, vpsPassword);
       if (!sshClient) {
-        return { success: false, message: authType === 'password'
-          ? 'SSH authentication failed. Please check your VPS password.'
-          : 'SSH authentication failed. Please check your SSH key.' };
+        return { success: false, message: 'SSH authentication failed. Please check your VPS password.' };
       }
 
-      // Step 4: Validate OS support
+      // Step 7: Validate OS support
       const osValidation = await this.validateOSSupport(sshClient);
       if (!osValidation.isValid) {
         sshClient.end();
@@ -384,15 +110,12 @@ export class InstallService {
 
       // Create install record before execution
       const result = await db.run(`
-        INSERT INTO install_data (user_id, ip, ssh_port, auth_type, passwd_vps, ssh_key, win_ver, passwd_rdp, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO install_data (user_id, ip, passwd_vps, win_ver, passwd_rdp, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         userId,
         ip,
-        sshPort,
-        authType,
-        authType === 'password' ? vpsPassword : null,
-        authType === 'ssh_key' ? sshKey : null,
+        vpsPassword,
         winVersion,
         rdpPassword,
         'pending',
@@ -402,7 +125,7 @@ export class InstallService {
 
       installId = result.lastID as number;
 
-      // Step 5: Execute installation script
+      // Step 8: Execute installation script
       await this.executeInstallationScript(sshClient, userId, ip, winVersion, rdpPassword, installId);
 
       // Update status to pending (waiting for script execution)
@@ -435,6 +158,12 @@ export class InstallService {
       // Update install status to failed if we have an installId
       if (installId) {
         await this.updateInstallStatus(installId, 'failed', error.message);
+        
+        // Refund quota on failure
+        // await db.run(
+        //   'UPDATE users SET quota = quota + 1, updated_at = ? WHERE id = ?',
+        //   [DateUtils.nowSQLite(), userId]
+        // );
       }
 
       return {
@@ -477,37 +206,13 @@ export class InstallService {
    */
   private static async validateWindowsVersion(winVersion: string): Promise<InstallValidationResult> {
     try {
-      // Additional validation for undefined/empty values
-      if (!winVersion || winVersion === 'undefined' || winVersion.trim() === '') {
-        logger.error('Windows version is undefined or empty:', {
-          winVersion,
-          winVersionType: typeof winVersion
-        });
-        return {
-          isValid: false,
-          error: 'Windows version is required. Please select a valid Windows version from the dropdown.',
-          step: 'windows_validation'
-        };
-      }
-
       const db = getDatabase();
-      
-      logger.info('Validating Windows version:', { winVersion });
-      
-      // Get all available versions for debugging
-      const allVersions = await db.all('SELECT id, name, slug FROM windows_versions');
-      logger.info('Available Windows versions in database:', allVersions);
-      
       const version = await db.get('SELECT id FROM windows_versions WHERE slug = ?', [winVersion]);
       
       if (!version) {
-        logger.error('Windows version not found:', { 
-          winVersion, 
-          availableVersions: allVersions.map(v => v.slug) 
-        });
         return { 
           isValid: false, 
-          error: `Invalid Windows version '${winVersion}'. Please select from available versions: ${allVersions.map(v => `${v.name} (${v.slug})`).join(', ')}`, 
+          error: 'Invalid Windows version selected', 
           step: 'windows_validation' 
         };
       }
@@ -575,272 +280,87 @@ export class InstallService {
   }
 
   /**
-   * Step 5: Check if VPS is online (custom SSH port)
+   * Step 5: Check if VPS is online (port 22 SSH)
    */
-  private static async validateVPSOnline(ip: string, port: number = 22): Promise<InstallValidationResult> {
+  private static async validateVPSOnline(ip: string): Promise<InstallValidationResult> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port, timeout: 7000 });
+      const socket = createConnection({ host: ip, port: 22, timeout: 7000 });
       
       socket.on('connect', () => {
         socket.destroy();
-        logger.info('VPS online validation passed:', { ip, port });
+        logger.info('VPS online validation passed:', { ip });
         resolve({ isValid: true, step: 'vps_online_validation' });
       });
 
       socket.on('timeout', () => {
         socket.destroy();
-        logger.warn('VPS connection timeout:', { ip, port });
-        resolve({
-          isValid: false,
-          error: `VPS at ${ip}:${port} is not responding. Please check if the server is online and SSH is accessible on port ${port}.`,
-          step: 'vps_online_validation'
+        logger.warn('VPS connection timeout:', { ip });
+        resolve({ 
+          isValid: false, 
+          error: `VPS at ${ip} is not responding. Please check if the server is online and SSH is enabled.`, 
+          step: 'vps_online_validation' 
         });
       });
 
       socket.on('error', (error) => {
         socket.destroy();
-        logger.warn('VPS connection error:', { ip, port, error: error.message });
-        resolve({
-          isValid: false,
-          error: `Cannot connect to VPS at ${ip}:${port}. Please verify the IP address, port, and ensure SSH is accessible.`,
-          step: 'vps_online_validation'
+        logger.warn('VPS connection error:', { ip, error: error.message });
+        resolve({ 
+          isValid: false, 
+          error: `Cannot connect to VPS at ${ip}. Please verify the IP address and ensure SSH is accessible.`, 
+          step: 'vps_online_validation' 
         });
       });
     });
   }
 
   /**
-   * Step 6: Validate SSH credentials with enhanced key parsing
+   * Step 6: Validate SSH credentials
    */
-  private static async validateSSHCredentials(
-    ip: string,
-    port: number = 22,
-    authType: 'password' | 'ssh_key',
-    password: string,
-    sshKey: string
-  ): Promise<Client | null> {
+  private static async validateSSHCredentials(ip: string, password: string): Promise<Client | null> {
     return new Promise((resolve) => {
       const client = new Client();
       let connectionTimeout: NodeJS.Timeout;
       
       connectionTimeout = setTimeout(() => {
-        logger.warn('SSH connection timeout:', { ip, port, authType });
+        logger.warn('SSH connection timeout:', { ip });
         client.end();
         resolve(null);
       }, 10000);
       
       client.on('ready', () => {
         clearTimeout(connectionTimeout);
-        logger.info('SSH authentication successful:', { ip, port, authType });
+        logger.info('SSH authentication successful:', { ip });
         resolve(client);
       });
 
       client.on('error', (error) => {
         clearTimeout(connectionTimeout);
-        logger.warn('SSH authentication failed:', { ip, port, authType, error: error.message });
+        logger.warn('SSH authentication failed:', { ip, error: error.message });
         client.end();
         resolve(null);
       });
 
       try {
-        const connectOptions: any = {
+        client.connect({
           host: ip,
-          port: port,
+          port: 22,
           username: 'root',
+          password: password,
           readyTimeout: 15000,
-          keepaliveInterval: 30000,
-          keepaliveCountMax: 3,
           algorithms: {
-            kex: [
-              'diffie-hellman-group14-sha256',
-              'diffie-hellman-group16-sha512',
-              'diffie-hellman-group14-sha1',
-              'diffie-hellman-group1-sha1',
-              'ecdh-sha2-nistp256',
-              'ecdh-sha2-nistp384',
-              'ecdh-sha2-nistp521',
-              'curve25519-sha256@libssh.org',
-              'curve25519-sha256'
-            ],
-            cipher: [
-              'aes128-ctr',
-              'aes192-ctr',
-              'aes256-ctr',
-              'aes128-gcm@openssh.com',
-              'aes256-gcm@openssh.com',
-              'chacha20-poly1305@openssh.com',
-              'aes128-cbc',
-              'aes192-cbc',
-              'aes256-cbc'
-            ],
-            hmac: [
-              'hmac-sha2-256',
-              'hmac-sha2-512',
-              'hmac-sha1',
-              'hmac-sha2-256-etm@openssh.com',
-              'hmac-sha2-512-etm@openssh.com',
-              'hmac-sha1-96',
-              'hmac-md5'
-            ],
-            compress: ['none', 'zlib']
+            kex: ['diffie-hellman-group14-sha256', 'diffie-hellman-group14-sha1'],
+            cipher: ['aes128-ctr', 'aes192-ctr', 'aes256-ctr'],
+            hmac: ['hmac-sha2-256', 'hmac-sha2-512', 'hmac-sha1'],
+            compress: ['none']
           }
-        };
-
-        if (authType === 'password') {
-          connectOptions.password = password;
-          logger.info('Using password authentication for SSH connection');
-        } else {
-          // SSH key authentication - parse and validate the key
-          const parsedKey = this.parseSSHKey(sshKey);
-          if (!parsedKey) {
-            logger.error('Failed to parse SSH key:', { 
-              keyLength: sshKey.length,
-              keyStart: sshKey.substring(0, 50),
-              ip, 
-              port 
-            });
-            clearTimeout(connectionTimeout);
-            resolve(null);
-            return;
-          }
-          logger.info('Using SSH key authentication:', {
-            keyLength: parsedKey.length,
-            keyType: this.detectSSHKeyType(parsedKey)
-          });
-          connectOptions.privateKey = parsedKey;
-        }
-
-        client.connect(connectOptions);
+        });
       } catch (error: any) {
         clearTimeout(connectionTimeout);
-        logger.error('SSH connection setup failed:', { ip, port, authType, error: error.message });
+        logger.error('SSH connection setup failed:', { ip, error: error.message });
         resolve(null);
       }
     });
-  }
-
-  /**
-   * Enhanced SSH key parsing and validation
-   */
-  private static parseSSHKey(rawKey: string): string | null {
-    try {
-      if (!rawKey || typeof rawKey !== 'string') {
-        logger.error('SSH key is empty or not a string');
-        return null;
-      }
-
-      // Remove any extra whitespace and normalize line endings
-      let cleanKey = rawKey.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      
-      logger.info('Processing SSH key:', {
-        originalLength: rawKey.length,
-        cleanedLength: cleanKey.length,
-        startsWithBegin: cleanKey.startsWith('-----BEGIN'),
-        endsWithEnd: cleanKey.includes('-----END'),
-        lineCount: cleanKey.split('\n').length
-      });
-
-      // Check if it's already in proper format
-      if (cleanKey.startsWith('-----BEGIN') && cleanKey.includes('-----END')) {
-        // Validate the key structure
-        const lines = cleanKey.split('\n');
-        const beginLine = lines[0];
-        const endLine = lines[lines.length - 1];
-        
-        // Support multiple key types
-        const supportedKeyTypes = [
-          'OPENSSH PRIVATE KEY',
-          'RSA PRIVATE KEY', 
-          'DSA PRIVATE KEY',
-          'EC PRIVATE KEY',
-          'PRIVATE KEY',
-          'ED25519 PRIVATE KEY'
-        ];
-        
-        const isValidKeyType = supportedKeyTypes.some(keyType => 
-          beginLine.includes(keyType) && endLine.includes(keyType)
-        );
-        
-        if (!isValidKeyType) {
-          logger.error('Unsupported SSH key type:', { beginLine, endLine });
-          return null;
-        }
-        
-        // Ensure proper line endings
-        if (!cleanKey.endsWith('\n')) {
-          cleanKey += '\n';
-        }
-        
-        logger.info('SSH key validation successful:', {
-          keyType: beginLine,
-          lineCount: lines.length,
-          hasProperEnding: cleanKey.endsWith('\n')
-        });
-        
-        return cleanKey;
-      }
-      
-      // If it's a single line key (like from copy-paste), try to format it
-      if (cleanKey.includes('-----BEGIN') && cleanKey.includes('-----END')) {
-        // Split by common delimiters and reconstruct
-        let formattedKey = cleanKey;
-        
-        // Handle keys that were pasted as single line
-        formattedKey = formattedKey.replace(/-----BEGIN ([^-]+)-----([^-]+)-----END ([^-]+)-----/g, 
-          (match, beginType, content, endType) => {
-            if (beginType !== endType) {
-              logger.error('SSH key begin/end type mismatch:', { beginType, endType });
-              return match;
-            }
-            
-            // Clean and format the content
-            const cleanContent = content.replace(/\s+/g, '');
-            const lines = [];
-            
-            // Add header
-            lines.push(`-----BEGIN ${beginType}-----`);
-            
-            // Split content into 64-character lines (standard for PEM format)
-            for (let i = 0; i < cleanContent.length; i += 64) {
-              lines.push(cleanContent.substring(i, i + 64));
-            }
-            
-            // Add footer
-            lines.push(`-----END ${endType}-----`);
-            
-            return lines.join('\n');
-          }
-        );
-        
-        if (!formattedKey.endsWith('\n')) {
-          formattedKey += '\n';
-        }
-        
-        logger.info('SSH key reformatted from single line:', {
-          originalLength: cleanKey.length,
-          formattedLength: formattedKey.length,
-          lineCount: formattedKey.split('\n').length
-        });
-        
-        return formattedKey;
-      }
-      
-      logger.error('SSH key does not appear to be in valid PEM format:', {
-        keyStart: cleanKey.substring(0, 100),
-        keyLength: cleanKey.length,
-        hasBegin: cleanKey.includes('-----BEGIN'),
-        hasEnd: cleanKey.includes('-----END')
-      });
-      
-      return null;
-      
-    } catch (error: any) {
-      logger.error('SSH key parsing failed:', {
-        error: error.message,
-        keyLength: rawKey?.length || 0
-      });
-      return null;
-    }
   }
 
   /**
@@ -1046,7 +566,7 @@ export class InstallService {
         .replace(/__PASSWD__/g, rdpPassword);
 
       const first30Lines = modifiedContent.split('\n').slice(0, 30).join('\n');
-      logger.info('Modified script (first 30 lines):', first30Lines);
+      logger.info('Modified script (first 50 lines):', first30Lines);
       
       // Obfuscate using bash-obfuscate
       const obfuscated = await this.obfuscateScript(modifiedContent);
@@ -1062,75 +582,76 @@ export class InstallService {
    * Obfuscate script using bash-obfuscate npm package
    */
   private static async obfuscateScript(script: string): Promise<string> {
-    const execAsync = promisify(exec);
-    let tempInputFile: string | null = null;
-    let tempOutputFile: string | null = null;
-    
-    try {
-      // Create temporary files
-      const tempDir = os.tmpdir();
-      tempInputFile = path.join(tempDir, `input_${Date.now()}.sh`);
-      tempOutputFile = path.join(tempDir, `output_${Date.now()}.sh`);
-      
-      // Write script to temporary input file
-      await fs.writeFile(tempInputFile, script, 'utf8');
-      
-      // Execute bash-obfuscate command - input file should be positional argument, not -f flag
-      const command = `bash-obfuscate "${tempInputFile}" -o "${tempOutputFile}"`;
-      
-      logger.info('Starting script obfuscation using bash-obfuscate...');
+
+      const execAsync = promisify(exec);
+      let tempInputFile: string | null = null;
+      let tempOutputFile: string | null = null;
       
       try {
-        const { stdout, stderr } = await execAsync(command);
+        // Create temporary files
+        const tempDir = os.tmpdir();
+        tempInputFile = path.join(tempDir, `input_${Date.now()}.sh`);
+        tempOutputFile = path.join(tempDir, `output_${Date.now()}.sh`);
         
-        if (stderr) {
-          logger.warn('bash-obfuscate stderr:', stderr);
+        // Write script to temporary input file
+        await fs.writeFile(tempInputFile, script, 'utf8');
+        
+        // Execute bash-obfuscate command - input file should be positional argument, not -f flag
+        const command = `bash-obfuscate "${tempInputFile}" -o "${tempOutputFile}"`;
+        
+        logger.info('Starting script obfuscation using bash-obfuscate...');
+        
+        try {
+          const { stdout, stderr } = await execAsync(command);
+          
+          if (stderr) {
+            logger.warn('bash-obfuscate stderr:', stderr);
+          }
+          
+          if (stdout) {
+            logger.info('bash-obfuscate stdout:', stdout);
+          }
+        } catch (execError: any) {
+          // Check if bash-obfuscate is installed
+          if (execError.code === 127 || execError.message.includes('command not found')) {
+            throw new Error('bash-obfuscate is not installed. Please install it globally: npm install -g bash-obfuscate');
+          }
+          throw execError;
         }
         
-        if (stdout) {
-          logger.info('bash-obfuscate stdout:', stdout);
+        // Read the obfuscated script
+        const obfuscatedScript = await fs.readFile(tempOutputFile, 'utf8');
+        
+        if (!obfuscatedScript || obfuscatedScript.trim().length === 0) {
+          throw new Error('Obfuscation resulted in empty output');
         }
-      } catch (execError: any) {
-        // Check if bash-obfuscate is installed
-        if (execError.code === 127 || execError.message.includes('command not found')) {
-          throw new Error('bash-obfuscate is not installed. Please install it globally: npm install -g bash-obfuscate');
+        
+        logger.info('Script obfuscated successfully using bash-obfuscate :', obfuscatedScript.substring(0,1000));
+        return obfuscatedScript;
+        
+      } catch (error: any) {
+        logger.error('Script obfuscation failed:', error);
+        
+        if (error.message.includes('bash-obfuscate is not installed')) {
+          throw error; // Re-throw installation error as-is
         }
-        throw execError;
-      }
-      
-      // Read the obfuscated script
-      const obfuscatedScript = await fs.readFile(tempOutputFile, 'utf8');
-      
-      if (!obfuscatedScript || obfuscatedScript.trim().length === 0) {
-        throw new Error('Obfuscation resulted in empty output');
-      }
-      
-      logger.info('Script obfuscated successfully using bash-obfuscate:', obfuscatedScript.substring(0,1000));
-      return obfuscatedScript;
-      
-    } catch (error: any) {
-      logger.error('Script obfuscation failed:', error);
-      
-      if (error.message.includes('bash-obfuscate is not installed')) {
-        throw error; // Re-throw installation error as-is
-      }
-      
-      throw new Error(`Failed to obfuscate installation script: ${error.message}`);
-      
-    } finally {
-      // Cleanup temporary files
-      try {
-        if (tempInputFile) {
-          await fs.unlink(tempInputFile);
+        
+        throw new Error(`Failed to obfuscate installation script: ${error.message}`);
+        
+      } finally {
+        // Cleanup temporary files
+        try {
+          if (tempInputFile) {
+            await fs.unlink(tempInputFile);
+          }
+          if (tempOutputFile) {
+            await fs.unlink(tempOutputFile);
+          }
+        } catch (cleanupError) {
+          logger.warn('Failed to cleanup temporary files:', cleanupError);
         }
-        if (tempOutputFile) {
-          await fs.unlink(tempOutputFile);
-        }
-      } catch (cleanupError) {
-        logger.warn('Failed to cleanup temporary files:', cleanupError);
       }
     }
-  }
 
   /**
    * Build the final execution command
@@ -1141,8 +662,9 @@ export class InstallService {
     
     // Create a stealthy execution command
     const command = `setsid bash -c '{ exec -a "[kworker/u8:5-kworker/0:0]" bash <<<"echo \\"${encoded}\\" | base64 -d | gzip -d | exec -a \\"[kworker/u8:1-events]\\" bash -s" & }; disown' > /dev/null 2>&1`;
-    logger.info('Compressed command script:', command);
+    logger.info('Compressed command script :', command);
     return command;
+  
   }
 
   /**
@@ -1225,7 +747,7 @@ export class InstallService {
     userId: number,
     ip: string
   ): Promise<void> {
-    // Start periodic monitoring every 5 seconds
+    // Start periodic monitoring every 30 seconds
     const monitoringInterval = setInterval(async () => {
       try {
         const install = await this.getInstallById(installId);
@@ -1316,8 +838,7 @@ export class InstallService {
       maxDuration: '30 minutes'
     });
   }
-
-  /**
+/**
    * Resume installation monitoring after server restart
    * This should be called during server startup
    */
@@ -1443,7 +964,7 @@ export class InstallService {
       try {
         const install = await this.getInstallById(installId);
         if (install && install.status === 'running') {
-          const isWindowsReady = await this.checkWindowsRDP(install.ip);
+          const isWindowsReady = await this.checkWindowsRDP(ip);
           if (isWindowsReady) {
             await this.updateInstallStatus(installId, 'completed', 'Windows installation completed successfully');
           } else {
@@ -1482,13 +1003,13 @@ export class InstallService {
   /**
    * Check if Windows RDP is accessible
    */
-  private static async checkWindowsRDP(ip: string, port: number = 22): Promise<boolean> {
+  private static async checkWindowsRDP(ip: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = createConnection({ host: ip, port, timeout: 5000 });
+      const socket = createConnection({ host: ip, port: 22, timeout: 5000 });
       
       socket.on('connect', () => {
         socket.destroy();
-        logger.info('Windows RDP is accessible:', { ip, port });
+        logger.info('Windows RDP is accessible:', { ip });
         resolve(true);
       });
 
@@ -1552,6 +1073,9 @@ export class InstallService {
           ip: install.ip,
           winVersion: install.win_ver
         });
+
+        // Real-time notifications are already sent via notifyInstallStatusUpdate above
+        // No need for additional email notifications for installation status changes
       }
     } catch (error: any) {
       logger.error('Failed to update install status:', {
@@ -1568,9 +1092,9 @@ export class InstallService {
   private static getDefaultInstallScript(): string {
     return `#!/bin/bash
 # Default installation script
-echo "RDP Password: __PASSWD__"
+__PASSWD__
 sleep 5
-curl -O __GZLINK__
+curl __GZLINK__
 `;
   }
 
@@ -1590,26 +1114,6 @@ curl -O __GZLINK__
       logger.error('Failed to get install by ID:', { installId, error: error.message });
       return null;
     }
-  }
-
-  /**
-   * Detect SSH key type from parsed key
-   */
-  private static detectSSHKeyType(sshKey: string): string {
-    if (sshKey.includes('-----BEGIN OPENSSH PRIVATE KEY-----')) {
-      return 'OpenSSH';
-    } else if (sshKey.includes('-----BEGIN RSA PRIVATE KEY-----')) {
-      return 'RSA';
-    } else if (sshKey.includes('-----BEGIN DSA PRIVATE KEY-----')) {
-      return 'DSA';
-    } else if (sshKey.includes('-----BEGIN EC PRIVATE KEY-----')) {
-      return 'EC';
-    } else if (sshKey.includes('-----BEGIN PRIVATE KEY-----')) {
-      return 'PKCS#8';
-    } else if (sshKey.includes('-----BEGIN ED25519 PRIVATE KEY-----')) {
-      return 'ED25519';
-    }
-    return 'Unknown';
   }
 
   /**

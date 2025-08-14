@@ -290,10 +290,7 @@ router.post('/install',
     const result = await InstallService.processInstallation(
       req.user.id,
       validatedData.ip,
-      validatedData.ssh_port || 22,
-      validatedData.auth_type || 'password',
       validatedData.passwd_vps || '',
-      validatedData.ssh_key || '',
       validatedData.win_ver,
       validatedData.passwd_rdp || ''
     );

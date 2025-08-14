@@ -27,7 +27,6 @@ import { tripayService } from '../services/tripayService.js';
 import { NotificationService } from '../services/notificationService.js';
 import { InstallService } from '../services/installService.js';
 import { DatabaseSecurity } from '../utils/dbSecurity.js';
-import { ValidationUtils } from '../utils/validation.js';
 import { DateUtils } from '../utils/dateUtils.js';
 import { logger } from '../utils/logger.js';
 
@@ -565,73 +564,12 @@ router.post('/install',
 
     const validatedData = req.body;
 
-    // Add detailed logging for debugging the undefined winVersion issue
-    logger.info('Install request received:', {
-      userId: req.user.id,
-      requestBody: req.body,
-      validatedData,
-      winVer: validatedData.win_ver,
-      winVerType: typeof validatedData.win_ver,
-      allFields: Object.keys(validatedData)
-    });
-
-    // Additional validation for win_ver
-    if (!validatedData.win_ver || validatedData.win_ver === 'undefined') {
-      logger.error('Windows version validation failed:', {
-        winVer: validatedData.win_ver,
-        winVerType: typeof validatedData.win_ver,
-        userId: req.user.id,
-        requestBody: req.body
-      });
-      
-      res.status(400).json({
-        success: false,
-        message: 'Windows version is required. Please select a valid Windows version.',
-        error: 'MISSING_WINDOWS_VERSION'
-      } as ApiResponse);
-      return;
-    }
-
-    // Additional SSH key validation if using SSH key authentication
-    if (validatedData.auth_type === 'ssh_key' && validatedData.ssh_key) {
-      // Use the enhanced SSH key validation from InstallService
-      const { InstallService } = await import('../services/installService.js');
-      const sshKeyValidation = (InstallService as any).validateSSHKeyAdvanced(validatedData.ssh_key);
-      
-      if (!sshKeyValidation.isValid) {
-        logger.error('SSH key validation failed:', {
-          userId: req.user.id,
-          errors: sshKeyValidation.errors,
-          keyLength: validatedData.ssh_key.length,
-          keyStart: validatedData.ssh_key.substring(0, 50),
-          keyType: sshKeyValidation.keyType
-        });
-        
-        res.status(400).json({
-          success: false,
-          message: `SSH key validation failed: ${sshKeyValidation.errors.join(', ')}`,
-          error: 'INVALID_SSH_KEY',
-          data: { errors: sshKeyValidation.errors }
-        } as ApiResponse);
-        return;
-      }
-      
-      logger.info('SSH key validation passed:', {
-        userId: req.user.id,
-        keyType: sshKeyValidation.keyType,
-        keyLength: validatedData.ssh_key.length,
-        validationMethod: 'enhanced'
-      });
-    }
     
     // Process installation with comprehensive validation
     const result = await InstallService.processInstallation(
       req.user.id,
       validatedData.ip,
-      validatedData.ssh_port || 22,
-      validatedData.auth_type || 'password',
       validatedData.passwd_vps || '',
-      validatedData.ssh_key || '',
       validatedData.win_ver,
       validatedData.passwd_rdp || ''
     );

@@ -289,18 +289,10 @@ function sanitizeRequestBody(body: any): any {
 
   for (const [key, value] of Object.entries(body)) {
     if (typeof value === 'string') {
-      // Special handling for SSH keys - preserve formatting
-      if (key === 'ssh_key' && value.includes('-----BEGIN')) {
-        // For SSH keys, only remove null bytes and control characters, preserve line breaks
-        sanitized[key] = value
-          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-          .trim();
-      } else {
-        sanitized[key] = value
-          .trim()
-          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-          .replace(/\s+/g, ' ');
-      }
+      sanitized[key] = value
+        .trim()
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+        .replace(/\s+/g, ' ');
     } else if (typeof value === 'number') {
       sanitized[key] = Number.isFinite(value) ? value : 0;
     } else if (typeof value === 'boolean') {

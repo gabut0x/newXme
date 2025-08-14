@@ -1,37 +1,55 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Separator } from '@/components/ui/separator';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { ThemeToggle } from '@/components/ThemeToggle';
-import { useAuth, DashboardNotification } from '@/contexts/AuthContext';
-import { useToast } from '@/hooks/use-toast';
-import { useNotifications } from '@/hooks/useNotifications';
-import { 
-  apiService, 
-  DashboardData, 
-  WindowsVersion, 
-  InstallData, 
+import React, { useState, useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { useAuth, DashboardNotification } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { useNotifications } from "@/hooks/useNotifications";
+import {
+  apiService,
+  DashboardData,
+  WindowsVersion,
+  InstallData,
   CreateInstallRequest,
-  TopupTransaction
-} from '@/services/api';
-import { 
-  Code, 
-  LogOut, 
-  User, 
-  Settings, 
+  TopupTransaction,
+} from "@/services/api";
+import {
+  Code,
+  LogOut,
+  User,
+  Settings,
   Bell,
   Monitor,
   History,
@@ -59,8 +77,8 @@ import {
   RefreshCw,
   ExternalLink,
   Download,
-  Copy
-} from 'lucide-react';
+  Copy,
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,14 +86,14 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
   DropdownMenuLabel,
-} from '@/components/ui/dropdown-menu';
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from "@/components/ui/dialog";
 import {
   Pagination,
   PaginationContent,
@@ -83,44 +101,26 @@ import {
   PaginationLink,
   PaginationNext,
   PaginationPrevious,
-} from '@/components/ui/pagination';
-import TopupModal from '@/components/TopupModal';
+} from "@/components/ui/pagination";
+import TopupModal from "@/components/TopupModal";
 
 // Schema validation for install form
 const installSchema = z.object({
-  ip: z.string()
-    .min(1, 'VPS IP address is required')
-    .refine((value) => {
-      // Support both IP and IP:port formats
-      const ipPortRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?::([1-9][0-9]{0,4}))?$/;
-      const match = value.match(ipPortRegex);
-      if (!match) return false;
-      
-      // If port is specified, validate it's within valid range
-      if (match[1]) {
-        const port = parseInt(match[1]);
-        return port >= 1 && port <= 65535;
-      }
-      return true;
-    }, 'Invalid IP format. Use 1.1.1.1 or 1.1.1.1:port'),
-  auth_type: z.enum(['password', 'ssh_key']).default('password'),
-  passwd_vps: z.string().optional(),
-  ssh_key_file: z.any().optional(), // For file upload
-  win_ver: z.string().min(1, 'Windows version is required'),
-  passwd_rdp: z.string()
-    .min(4, 'RDP password must be at least 4 characters')
-    .refine((password) => !password.startsWith('#'), {
-      message: 'RDP password cannot start with "#" character'
+  ip: z
+    .string()
+    .min(1, "IP address is required")
+    .regex(
+      /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/,
+      "Invalid IPv4 address",
+    ),
+  passwd_vps: z.string().min(1, "VPS password is required"),
+  win_ver: z.string().min(1, "Windows version is required"),
+  passwd_rdp: z
+    .string()
+    .min(4, "RDP password must be at least 4 characters")
+    .refine((password) => !password.startsWith("#"), {
+      message: 'RDP password cannot start with "#" character',
     }),
-}).refine((data) => {
-  // If auth_type is password, passwd_vps is required
-  if (data.auth_type === 'password' && (!data.passwd_vps || data.passwd_vps.trim() === '')) {
-    return false;
-  }
-  return true;
-}, {
-  message: 'VPS password is required when using password authentication',
-  path: ['passwd_vps']
 });
 
 type InstallFormData = z.infer<typeof installSchema>;
@@ -139,41 +139,47 @@ interface PaymentModalData {
 const ITEMS_PER_PAGE = 15;
 
 export default function UserDashboardPage() {
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(
+    null,
+  );
   const [windowsVersions, setWindowsVersions] = useState<WindowsVersion[]>([]);
   const [installHistory, setInstallHistory] = useState<InstallData[]>([]);
   const [topupHistory, setTopupHistory] = useState<TopupTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingTopup, setIsLoadingTopup] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'install' | 'install-history' | 'topup-history' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<
+    "dashboard" | "install" | "install-history" | "topup-history" | "settings"
+  >("dashboard");
   const [showTopupModal, setShowTopupModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentModalData, setPaymentModalData] = useState<PaymentModalData | null>(null);
-  const [selectedTransaction, setSelectedTransaction] = useState<TopupTransaction | null>(null);
+  const [paymentModalData, setPaymentModalData] =
+    useState<PaymentModalData | null>(null);
+  const [selectedTransaction, setSelectedTransaction] =
+    useState<TopupTransaction | null>(null);
   const [showTransactionDetails, setShowTransactionDetails] = useState(false);
   const [isCheckingPaymentStatus, setIsCheckingPaymentStatus] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showRdpPassword, setShowRdpPassword] = useState(false);
   const [showVpsPassword, setShowVpsPassword] = useState(false);
-  const [authType, setAuthType] = useState<'password' | 'ssh_key'>('password');
-  const [sshPort, setSshPort] = useState<string>('22');
-  const [sshKeyFile, setSshKeyFile] = useState<File | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showRdpModal, setShowRdpModal] = useState(false);
-  const [selectedInstall, setSelectedInstall] = useState<InstallData | null>(null);
-  
+  const [selectedInstall, setSelectedInstall] = useState<InstallData | null>(
+    null,
+  );
+  const [showRootPasswordHelp, setShowRootPasswordHelp] = useState(false);
+
   // Settings states
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
   const [isConnectingTelegram, setIsConnectingTelegram] = useState(false);
   const [telegramNotifications, setTelegramNotifications] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: ''
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
   });
-  
+
   // Pagination states
   const [installHistoryPage, setInstallHistoryPage] = useState(1);
   const [topupHistoryPage, setTopupHistoryPage] = useState(1);
@@ -190,54 +196,24 @@ export default function UserDashboardPage() {
     formState: { errors },
     reset,
     setValue,
-    watch,
   } = useForm<InstallFormData>({
     resolver: zodResolver(installSchema),
-    defaultValues: {
-      auth_type: 'password'
-    }
   });
-
-  // Watch auth_type to conditionally show fields
-  const watchedAuthType = watch('auth_type');
-
-  // Helper function to parse IP and port
-  const parseIPAndPort = (ipString: string): { ip: string; port: number } => {
-    const parts = ipString.split(':');
-    if (parts.length === 2) {
-      return { ip: parts[0], port: parseInt(parts[1]) };
-    }
-    return { ip: parts[0], port: 22 };
-  };
-
-  // Handle SSH key file upload
-  const handleSshKeyFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setSshKeyFile(file);
-      // Read file content and set it to form
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const content = e.target?.result as string;
-        setValue('ssh_key_file', content);
-      };
-      reader.readAsText(file);
-    }
-  };
 
   // Update unread count and HTML title when notifications change
   useEffect(() => {
     const count = notifications.length;
     setUnreadCount(count);
-    
+
     // Update HTML title with notification counter
-    const originalTitle = "XME Projects - Turn your VPS into Windows RDP seamlessly";
+    const originalTitle =
+      "XME Projects - Turn your VPS into Windows RDP seamlessly";
     if (count > 0) {
       document.title = `(${count}) ${originalTitle}`;
     } else {
       document.title = originalTitle;
     }
-    
+
     // Cleanup: Reset title when component unmounts
     return () => {
       document.title = originalTitle;
@@ -246,53 +222,75 @@ export default function UserDashboardPage() {
 
   // Auto-refresh dashboard data when installation status or telegram connection notifications are received
   useEffect(() => {
-    console.log('📱 Notifications updated:', notifications.length, notifications);
-    
+    console.log(
+      "📱 Notifications updated:",
+      notifications.length,
+      notifications,
+    );
+
     // Check if there are new installation status notifications
-    const hasInstallStatusNotifications = notifications.some(notification =>
-      notification.type === 'install_status_update' ||
-      ['manual_review','completed', 'failed', 'running', 'pending', 'preparing'].includes(notification.status || '')
+    const hasInstallStatusNotifications = notifications.some(
+      (notification) =>
+        notification.type === "install_status_update" ||
+        ["completed", "failed", "running", "pending", "preparing"].includes(
+          notification.status || "",
+        ),
     );
-    
+
     // Check if there are new telegram connection notifications
-    const hasTelegramConnectionNotifications = notifications.some(notification =>
-      notification.type === 'telegram_connection_success'
+    const hasTelegramConnectionNotifications = notifications.some(
+      (notification) => notification.type === "telegram_connection_success",
     );
-    
-    console.log('🔍 Has install status notifications:', hasInstallStatusNotifications);
-    console.log('🔍 Has telegram connection notifications:', hasTelegramConnectionNotifications);
-    
+
+    console.log(
+      "🔍 Has install status notifications:",
+      hasInstallStatusNotifications,
+    );
+    console.log(
+      "🔍 Has telegram connection notifications:",
+      hasTelegramConnectionNotifications,
+    );
+
     if (hasInstallStatusNotifications) {
-      console.log('🔄 Installation status notification received, refreshing dashboard data...');
+      console.log(
+        "🔄 Installation status notification received, refreshing dashboard data...",
+      );
       loadData();
     }
-    
+
     if (hasTelegramConnectionNotifications) {
-      console.log('🔄 Telegram connection notification received, refreshing dashboard data...');
+      console.log(
+        "🔄 Telegram connection notification received, refreshing dashboard data...",
+      );
       loadData();
-      
+
       // Stop connecting state and show success message
       setIsConnectingTelegram(false);
-      
+
       // Find the telegram connection notification
-      const telegramNotification = notifications.find(n => n.type === 'telegram_connection_success');
+      const telegramNotification = notifications.find(
+        (n) => n.type === "telegram_connection_success",
+      );
       if (telegramNotification) {
         toast({
-          title: '🎉 Telegram Connected Successfully!',
+          title: "🎉 Telegram Connected Successfully!",
           description: telegramNotification.message,
         });
-        
+
         // Auto-enable notifications
         const enableNotifications = async () => {
           try {
             await apiService.updateTelegramNotifications({ enabled: true });
             setTelegramNotifications(true);
           } catch (error) {
-            console.error('Failed to auto-enable Telegram notifications:', error);
+            console.error(
+              "Failed to auto-enable Telegram notifications:",
+              error,
+            );
             setTelegramNotifications(true); // Still update local state
           }
         };
-        
+
         enableNotifications();
       }
     }
@@ -306,17 +304,24 @@ export default function UserDashboardPage() {
   useEffect(() => {
     if (dashboardData?.user) {
       // Initialize telegram notifications state based on user's current setting
-      setTelegramNotifications(dashboardData.user.telegram_notifications || false);
+      setTelegramNotifications(
+        dashboardData.user.telegram_notifications || false,
+      );
     }
   }, [dashboardData]);
 
   // Check connection status only when user is actively trying to connect
   useEffect(() => {
-    if (activeTab === 'settings' && dashboardData?.user && !dashboardData.user.telegram && isConnectingTelegram) {
+    if (
+      activeTab === "settings" &&
+      dashboardData?.user &&
+      !dashboardData.user.telegram &&
+      isConnectingTelegram
+    ) {
       const interval = setInterval(() => {
         loadData(); // Refresh user data to check if Telegram was connected
       }, 3000); // Check every 3 seconds, only when actively connecting
-      
+
       return () => clearInterval(interval);
     }
   }, [activeTab, dashboardData?.user?.telegram, isConnectingTelegram]);
@@ -326,7 +331,7 @@ export default function UserDashboardPage() {
 
   // Load topup history when topup tab is selected
   useEffect(() => {
-    if (activeTab === 'topup-history') {
+    if (activeTab === "topup-history") {
       loadTopupHistory();
     }
   }, [activeTab]);
@@ -335,19 +340,24 @@ export default function UserDashboardPage() {
   useEffect(() => {
     const checkExpiredTransactions = () => {
       const now = Math.floor(Date.now() / 1000);
-      const updatedHistory = topupHistory.map(transaction => {
-        if ((transaction.status === 'UNPAID' || transaction.status === 'PENDING') && 
-            transaction.expired_time && transaction.expired_time < now) {
-          return { ...transaction, status: 'EXPIRED' };
+      const updatedHistory = topupHistory.map((transaction) => {
+        if (
+          (transaction.status === "UNPAID" ||
+            transaction.status === "PENDING") &&
+          transaction.expired_time &&
+          transaction.expired_time < now
+        ) {
+          return { ...transaction, status: "EXPIRED" };
         }
         return transaction;
       });
-      
+
       // Only update if there are changes
-      const hasChanges = updatedHistory.some((transaction, index) => 
-        transaction.status !== topupHistory[index]?.status
+      const hasChanges = updatedHistory.some(
+        (transaction, index) =>
+          transaction.status !== topupHistory[index]?.status,
       );
-      
+
       if (hasChanges) {
         setTopupHistory(updatedHistory);
       }
@@ -363,33 +373,34 @@ export default function UserDashboardPage() {
 
     if (showPaymentModal && paymentModalData?.reference) {
       setIsCheckingPaymentStatus(true);
-      
+
       const checkPaymentStatus = async () => {
         try {
           const response = await apiService.getTopupHistory();
-          
+
           if (response.data.success && response.data.data) {
             const currentTransaction = response.data.data.find(
-              (transaction: any) => transaction.reference === paymentModalData.reference
+              (transaction: any) =>
+                transaction.reference === paymentModalData.reference,
             );
-            
-            if (currentTransaction && currentTransaction.status === 'PAID') {
+
+            if (currentTransaction && currentTransaction.status === "PAID") {
               // Payment successful - close modal and show success message
               setShowPaymentModal(false);
               setIsCheckingPaymentStatus(false);
-              
+
               toast({
-                title: 'Payment Successful!',
+                title: "Payment Successful!",
                 description: `Your quota has been updated successfully. Added ${currentTransaction.quantity} quota to your account.`,
-                variant: 'default',
+                variant: "default",
               });
-              
+
               // Refresh dashboard data and topup history
               await loadData();
-              if (activeTab === 'topup-history') {
+              if (activeTab === "topup-history") {
                 loadTopupHistory();
               }
-              
+
               // Clear the interval
               if (pollInterval) {
                 clearInterval(pollInterval);
@@ -398,7 +409,7 @@ export default function UserDashboardPage() {
             }
           }
         } catch (error) {
-          console.error('Error checking payment status:', error);
+          console.error("Error checking payment status:", error);
         }
       };
 
@@ -418,28 +429,30 @@ export default function UserDashboardPage() {
   const loadData = async () => {
     try {
       setIsLoading(true);
-      const [dashboardResponse, versionsResponse, historyResponse] = await Promise.all([
-        apiService.getDashboard(),
-        apiService.getWindowsVersions(),
-        apiService.getInstallHistory()
-      ]);
+      const [dashboardResponse, versionsResponse, historyResponse] =
+        await Promise.all([
+          apiService.getDashboard(),
+          apiService.getWindowsVersions(),
+          apiService.getInstallHistory(),
+        ]);
 
       if (dashboardResponse.data.success && dashboardResponse.data.data) {
         setDashboardData(dashboardResponse.data.data);
       }
-      
+
       if (versionsResponse.data.success && versionsResponse.data.data) {
         setWindowsVersions(versionsResponse.data.data);
       }
-      
+
       if (historyResponse.data.success && historyResponse.data.data) {
         setInstallHistory(historyResponse.data.data);
       }
     } catch (error: any) {
       toast({
-        variant: 'destructive',
-        title: 'Failed to load data',
-        description: error.response?.data?.message || 'Please try refreshing the page.',
+        variant: "destructive",
+        title: "Failed to load data",
+        description:
+          error.response?.data?.message || "Please try refreshing the page.",
       });
     } finally {
       setIsLoading(false);
@@ -450,24 +463,30 @@ export default function UserDashboardPage() {
     try {
       setIsLoadingTopup(true);
       const response = await apiService.getTopupHistory();
-      
+
       if (response.data.success && response.data.data) {
         // Check for expired transactions
         const now = Math.floor(Date.now() / 1000);
-        const updatedTransactions = response.data.data.map((transaction: TopupTransaction) => {
-          if ((transaction.status === 'UNPAID' || transaction.status === 'PENDING') && 
-              transaction.expired_time && transaction.expired_time < now) {
-            return { ...transaction, status: 'EXPIRED' };
-          }
-          return transaction;
-        });
+        const updatedTransactions = response.data.data.map(
+          (transaction: TopupTransaction) => {
+            if (
+              (transaction.status === "UNPAID" ||
+                transaction.status === "PENDING") &&
+              transaction.expired_time &&
+              transaction.expired_time < now
+            ) {
+              return { ...transaction, status: "EXPIRED" };
+            }
+            return transaction;
+          },
+        );
         setTopupHistory(updatedTransactions);
       }
     } catch (error: any) {
       toast({
-        variant: 'destructive',
-        title: 'Failed to load topup history',
-        description: error.response?.data?.message || 'Please try again.',
+        variant: "destructive",
+        title: "Failed to load topup history",
+        description: error.response?.data?.message || "Please try again.",
       });
     } finally {
       setIsLoadingTopup(false);
@@ -477,9 +496,9 @@ export default function UserDashboardPage() {
   const handleLogout = async () => {
     try {
       await logout();
-      navigate('/');
+      navigate("/");
     } catch (error) {
-      navigate('/');
+      navigate("/");
     }
   };
 
@@ -487,48 +506,35 @@ export default function UserDashboardPage() {
   const onInstallSubmit = async (data: InstallFormData) => {
     if (!dashboardData?.user.quota || dashboardData.user.quota <= 0) {
       toast({
-        variant: 'destructive',
-        title: 'Insufficient quota',
-        description: 'You need at least 1 quota to install Windows.',
+        variant: "destructive",
+        title: "Insufficient quota",
+        description: "You need at least 1 quota to install Windows.",
       });
       return;
     }
 
     try {
       setIsSubmitting(true);
-      
-      // Parse IP and port from the combined field
-      const { ip, port } = parseIPAndPort(data.ip);
-      
-      // Prepare install data
-      const installData = {
-        ip: ip,
-        ssh_port: port,
-        auth_type: data.auth_type,
-        passwd_vps: data.auth_type === 'password' ? data.passwd_vps : undefined,
-        ssh_key: data.auth_type === 'ssh_key' ? data.ssh_key_file : undefined,
-        win_ver: data.win_ver,
-        passwd_rdp: data.passwd_rdp
-      };
-      
-      const response = await apiService.createInstall(installData);
-      
+      const response = await apiService.createInstall(data);
+
       if (response.data.success) {
         toast({
-          title: 'Installation started',
-          description: 'Windows installation has been initiated. You will be notified when it completes.',
+          title: "Installation started",
+          description:
+            "Windows installation has been initiated. You will be notified when it completes.",
         });
-        
+
         // Reset form and reload data
         reset();
         await loadData();
-        setActiveTab('install-history');
+        setActiveTab("install-history");
       }
     } catch (error: any) {
       toast({
-        variant: 'destructive',
-        title: 'Installation failed',
-        description: error.response?.data?.message || 'Failed to start installation',
+        variant: "destructive",
+        title: "Installation failed",
+        description:
+          error.response?.data?.message || "Failed to start installation",
       });
     } finally {
       setIsSubmitting(false);
@@ -536,42 +542,54 @@ export default function UserDashboardPage() {
   };
 
   const getWindowsVersionName = (slug: string) => {
-    const version = windowsVersions.find(v => v.slug === slug);
+    const version = windowsVersions.find((v) => v.slug === slug);
     return version ? version.name : slug;
   };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'completed':
-        return <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-          <CheckCircle className="w-3 h-3 mr-1" />
-          Completed
-        </Badge>;
-      case 'running':
-        return <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-          <Activity className="w-3 h-3 mr-1" />
-          Running
-        </Badge>;
-      case 'pending':
-        return <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-          <Clock className="w-3 h-3 mr-1" />
-          Pending
-        </Badge>;
-      case 'preparing':
-        return <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
-          <RefreshCw className="w-3 h-3 mr-1" />
-          Preparing
-        </Badge>;
-      case 'failed':
-        return <Badge variant="destructive">
-          <XCircle className="w-3 h-3 mr-1" />
-          Failed
-        </Badge>;
-      case 'manual_review':
-        return <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
-          <AlertCircle className="w-3 h-3 mr-1" />
-          Manual Review
-        </Badge>;
+      case "completed":
+        return (
+          <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+            <CheckCircle className="w-3 h-3 mr-1" />
+            Completed
+          </Badge>
+        );
+      case "running":
+        return (
+          <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+            <Activity className="w-3 h-3 mr-1" />
+            Running
+          </Badge>
+        );
+      case "pending":
+        return (
+          <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+            <Clock className="w-3 h-3 mr-1" />
+            Pending
+          </Badge>
+        );
+      case "preparing":
+        return (
+          <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+            <RefreshCw className="w-3 h-3 mr-1" />
+            Preparing
+          </Badge>
+        );
+      case "failed":
+        return (
+          <Badge variant="destructive">
+            <XCircle className="w-3 h-3 mr-1" />
+            Failed
+          </Badge>
+        );
+      case "manual_review":
+        return (
+          <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+            <AlertCircle className="w-3 h-3 mr-1" />
+            Manual Review
+          </Badge>
+        );
       default:
         return <Badge variant="secondary">{status}</Badge>;
     }
@@ -583,7 +601,6 @@ export default function UserDashboardPage() {
   };
 
   const downloadRdpFile = (install: InstallData) => {
-    const rdpPort = install.ssh_port || 22;
     const rdpContent = `screen mode id:i:2
 use multimon:i:0
 desktopwidth:i:1920
@@ -636,10 +653,10 @@ kdcproxyname:s:
 enablerdsaadauth:i:0
 username:s:Administrator`;
 
-    const blob = new Blob([rdpContent], { type: 'application/x-rdp' });
+    const blob = new Blob([rdpContent], { type: "application/x-rdp" });
     const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.style.display = 'none';
+    const a = document.createElement("a");
+    a.style.display = "none";
     a.href = url;
     a.download = `${install.ip}-rdp.rdp`;
     document.body.appendChild(a);
@@ -649,7 +666,8 @@ username:s:Administrator`;
 
     toast({
       title: "RDP File Downloaded",
-      description: "Double-click the downloaded .rdp file to connect to your Windows server.",
+      description:
+        "Double-click the downloaded .rdp file to connect to your Windows server.",
     });
   };
 
@@ -664,42 +682,65 @@ username:s:Administrator`;
       toast({
         title: "Copy Failed",
         description: "Could not copy to clipboard.",
-        variant: "destructive"
+        variant: "destructive",
       });
     }
   };
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
+    return new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(amount);
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('id-ID', {
-      timeZone: 'Asia/Jakarta',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+    return new Date(dateString).toLocaleString("id-ID", {
+      timeZone: "Asia/Jakarta",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
   const getTopupStatusBadge = (status: string) => {
     const statusConfig = {
-      'PAID': { variant: 'default' as const, label: 'Paid', className: 'bg-green-500' },
-      'UNPAID': { variant: 'secondary' as const, label: 'Unpaid', className: 'bg-yellow-500' },
-      'PENDING': { variant: 'secondary' as const, label: 'Pending', className: 'bg-yellow-500' },
-      'EXPIRED': { variant: 'destructive' as const, label: 'Expired', className: '' },
-      'FAILED': { variant: 'destructive' as const, label: 'Failed', className: '' },
+      PAID: {
+        variant: "default" as const,
+        label: "Paid",
+        className: "bg-green-500",
+      },
+      UNPAID: {
+        variant: "secondary" as const,
+        label: "Unpaid",
+        className: "bg-yellow-500",
+      },
+      PENDING: {
+        variant: "secondary" as const,
+        label: "Pending",
+        className: "bg-yellow-500",
+      },
+      EXPIRED: {
+        variant: "destructive" as const,
+        label: "Expired",
+        className: "",
+      },
+      FAILED: {
+        variant: "destructive" as const,
+        label: "Failed",
+        className: "",
+      },
     };
 
-    const config = statusConfig[status as keyof typeof statusConfig] || 
-                   { variant: 'secondary' as const, label: status, className: '' };
+    const config = statusConfig[status as keyof typeof statusConfig] || {
+      variant: "secondary" as const,
+      label: status,
+      className: "",
+    };
 
     return (
       <Badge variant={config.variant} className={config.className}>
@@ -713,19 +754,22 @@ username:s:Administrator`;
       setPaymentModalData({
         reference: transaction.reference,
         checkout_url: transaction.checkout_url,
-        qr_url: (transaction as any).qr_url || `https://tripay.co.id/qr/${transaction.reference}`,
+        qr_url:
+          (transaction as any).qr_url ||
+          `https://tripay.co.id/qr/${transaction.reference}`,
         pay_code: (transaction as any).pay_code,
         payment_name: transaction.payment_method,
         final_amount: transaction.final_amount,
         status: transaction.status,
-        expired_time: transaction.expired_time
+        expired_time: transaction.expired_time,
       });
       setShowPaymentModal(true);
     } else {
       toast({
-        variant: 'destructive',
-        title: 'Payment URL not available',
-        description: 'This transaction cannot be paid. Please create a new topup.',
+        variant: "destructive",
+        title: "Payment URL not available",
+        description:
+          "This transaction cannot be paid. Please create a new topup.",
       });
     }
   };
@@ -736,10 +780,10 @@ username:s:Administrator`;
   };
 
   const isTransactionPayable = (transaction: TopupTransaction) => {
-    if (transaction.status !== 'UNPAID' && transaction.status !== 'PENDING') {
+    if (transaction.status !== "UNPAID" && transaction.status !== "PENDING") {
       return false;
     }
-    
+
     // Check if not expired
     const now = Math.floor(Date.now() / 1000);
     return transaction.expired_time > now;
@@ -756,17 +800,23 @@ username:s:Administrator`;
     return Math.ceil(totalItems / ITEMS_PER_PAGE);
   };
 
-  const renderPagination = (currentPage: number, totalItems: number, onPageChange: (page: number) => void) => {
+  const renderPagination = (
+    currentPage: number,
+    totalItems: number,
+    onPageChange: (page: number) => void,
+  ) => {
     const totalPages = getTotalPages(totalItems);
-    
+
     if (totalPages <= 1) return null;
 
     return (
       <div className="flex w-full items-center justify-between mt-6">
         <p className="text-xs text-muted-foreground w-full">
-          Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, totalItems)} of {totalItems} entries
+          Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to{" "}
+          {Math.min(currentPage * ITEMS_PER_PAGE, totalItems)} of {totalItems}{" "}
+          entries
         </p>
-        
+
         <Pagination>
           <PaginationContent>
             <PaginationItem>
@@ -780,7 +830,7 @@ username:s:Administrator`;
                 Previous
               </Button>
             </PaginationItem>
-            
+
             {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
               <PaginationItem key={page}>
                 <PaginationLink
@@ -792,7 +842,7 @@ username:s:Administrator`;
                 </PaginationLink>
               </PaginationItem>
             ))}
-            
+
             <PaginationItem>
               <Button
                 variant="outline"
@@ -813,49 +863,50 @@ username:s:Administrator`;
   // Password update handler
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       toast({
-        variant: 'destructive',
-        title: 'Password mismatch',
-        description: 'New password and confirm password must match.',
+        variant: "destructive",
+        title: "Password mismatch",
+        description: "New password and confirm password must match.",
       });
       return;
     }
 
     if (passwordForm.newPassword.length < 6) {
       toast({
-        variant: 'destructive',
-        title: 'Invalid password',
-        description: 'Password must be at least 6 characters long.',
+        variant: "destructive",
+        title: "Invalid password",
+        description: "Password must be at least 6 characters long.",
       });
       return;
     }
 
     try {
       setIsUpdatingPassword(true);
-      
+
       // Call API to update password
       await apiService.updatePassword({
         currentPassword: passwordForm.currentPassword,
-        newPassword: passwordForm.newPassword
+        newPassword: passwordForm.newPassword,
       });
-      
+
       toast({
-        title: 'Password updated',
-        description: 'Your password has been updated successfully.',
+        title: "Password updated",
+        description: "Your password has been updated successfully.",
       });
-      
+
       setPasswordForm({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: ''
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
       });
     } catch (error: any) {
       toast({
-        variant: 'destructive',
-        title: 'Update failed',
-        description: error.response?.data?.message || 'Failed to update password.',
+        variant: "destructive",
+        title: "Update failed",
+        description:
+          error.response?.data?.message || "Failed to update password.",
       });
     } finally {
       setIsUpdatingPassword(false);
@@ -866,24 +917,26 @@ username:s:Administrator`;
   const handleConnectTelegram = async () => {
     try {
       setIsConnectingTelegram(true);
-      
+
       // Call API to get Telegram connection URL/token
       const response = await apiService.connectTelegram();
-      
+
       if (response.data.success && response.data.data?.telegramBotUrl) {
         // Open Telegram bot link in new tab
-        window.open(response.data.data.telegramBotUrl, '_blank');
-        
+        window.open(response.data.data.telegramBotUrl, "_blank");
+
         toast({
-          title: 'Telegram Connection Started',
+          title: "Telegram Connection Started",
           description: `Connection link generated! The link expires in ${(response.data.data as any).expiresInMinutes || 10} minutes.`,
         });
       }
     } catch (error: any) {
       toast({
-        variant: 'destructive',
-        title: 'Connection failed',
-        description: error.response?.data?.message || 'Failed to initiate Telegram connection.',
+        variant: "destructive",
+        title: "Connection failed",
+        description:
+          error.response?.data?.message ||
+          "Failed to initiate Telegram connection.",
       });
     } finally {
       setIsConnectingTelegram(false);
@@ -892,29 +945,34 @@ username:s:Administrator`;
 
   // Disconnect Telegram handler
   const handleDisconnectTelegram = async () => {
-    if (!confirm('Are you sure you want to disconnect your Telegram account?')) {
+    if (
+      !confirm("Are you sure you want to disconnect your Telegram account?")
+    ) {
       return;
     }
 
     try {
       // Call API to disconnect Telegram
       const response = await apiService.disconnectTelegram();
-      
+
       if (response.data.success) {
         toast({
-          title: 'Telegram Disconnected',
-          description: 'Your Telegram account has been disconnected successfully.',
+          title: "Telegram Disconnected",
+          description:
+            "Your Telegram account has been disconnected successfully.",
         });
-        
+
         // Refresh user data
         await loadData();
         setTelegramNotifications(false);
       }
     } catch (error: any) {
       toast({
-        variant: 'destructive',
-        title: 'Disconnect failed',
-        description: error.response?.data?.message || 'Failed to disconnect Telegram account.',
+        variant: "destructive",
+        title: "Disconnect failed",
+        description:
+          error.response?.data?.message ||
+          "Failed to disconnect Telegram account.",
       });
     }
   };
@@ -924,16 +982,18 @@ username:s:Administrator`;
     try {
       await apiService.updateTelegramNotifications({ enabled });
       setTelegramNotifications(enabled);
-      
+
       toast({
-        title: 'Notification settings updated',
-        description: `Telegram notifications ${enabled ? 'enabled' : 'disabled'} successfully.`,
+        title: "Notification settings updated",
+        description: `Telegram notifications ${enabled ? "enabled" : "disabled"} successfully.`,
       });
     } catch (error: any) {
       toast({
-        variant: 'destructive',
-        title: 'Update failed',
-        description: error.response?.data?.message || 'Failed to update notification settings.',
+        variant: "destructive",
+        title: "Update failed",
+        description:
+          error.response?.data?.message ||
+          "Failed to update notification settings.",
       });
     }
   };
@@ -941,28 +1001,28 @@ username:s:Administrator`;
   // Sidebar menu items
   const menuItems = [
     {
-      id: 'dashboard',
-      label: 'Dashboard',
+      id: "dashboard",
+      label: "Dashboard",
       icon: LayoutDashboard,
     },
     {
-      id: 'install',
-      label: 'Install Windows',
+      id: "install",
+      label: "Install Windows",
       icon: Download,
     },
     {
-      id: 'install-history',
-      label: 'Install History',
+      id: "install-history",
+      label: "Install History",
       icon: History,
     },
     {
-      id: 'topup-history',
-      label: 'Topup History',
+      id: "topup-history",
+      label: "Topup History",
       icon: CreditCard,
     },
     {
-      id: 'settings',
-      label: 'Settings',
+      id: "settings",
+      label: "Settings",
       icon: Settings,
     },
   ];
@@ -995,8 +1055,14 @@ username:s:Administrator`;
   const user = dashboardData.user;
 
   // Get paginated data
-  const paginatedInstallHistory = getPaginatedData(installHistory, installHistoryPage);
-  const paginatedTopupHistory = getPaginatedData(topupHistory, topupHistoryPage);
+  const paginatedInstallHistory = getPaginatedData(
+    installHistory,
+    installHistoryPage,
+  );
+  const paginatedTopupHistory = getPaginatedData(
+    topupHistory,
+    topupHistoryPage,
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -1010,15 +1076,21 @@ username:s:Administrator`;
               className="lg:hidden"
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
-              {sidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+              {sidebarOpen ? (
+                <X className="h-4 w-4" />
+              ) : (
+                <Menu className="h-4 w-4" />
+              )}
             </Button>
-            
+
             <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
               <Code className="h-4 w-4 text-primary-foreground" />
             </div>
             <div>
               <h1 className="text-md md:text-xl font-bold">XME Projects</h1>
-              <p className="text-sm text-muted-foreground hidden sm:block">User Dashboard</p>
+              <p className="text-sm text-muted-foreground hidden sm:block">
+                User Dashboard
+              </p>
             </div>
           </div>
 
@@ -1034,11 +1106,11 @@ username:s:Administrator`;
                 <Bell className="h-4 w-4" />
                 {unreadCount > 0 && (
                   <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
-                    {unreadCount > 9 ? '9+' : unreadCount}
+                    {unreadCount > 9 ? "9+" : unreadCount}
                   </span>
                 )}
               </Button>
-              
+
               {/* Notifications Dropdown */}
               {showNotifications && (
                 <div className="absolute left-1/2 transform -translate-x-1/2 sm:left-auto sm:right-0 sm:transform-none top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-1rem)] bg-background border rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
@@ -1046,7 +1118,9 @@ username:s:Administrator`;
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="font-semibold">Notifications</h3>
-                        <p className="text-sm text-muted-foreground">{notifications.length} new notifications</p>
+                        <p className="text-sm text-muted-foreground">
+                          {notifications.length} new notifications
+                        </p>
                       </div>
                       {notifications.length > 0 && (
                         <Button
@@ -1057,7 +1131,8 @@ username:s:Administrator`;
                             setShowNotifications(false);
                             toast({
                               title: "Notifications cleared",
-                              description: "All notifications have been removed.",
+                              description:
+                                "All notifications have been removed.",
                             });
                           }}
                           className="ml-2"
@@ -1068,7 +1143,7 @@ username:s:Administrator`;
                       )}
                     </div>
                   </div>
-                  
+
                   {notifications.length === 0 ? (
                     <div className="p-4 text-center text-muted-foreground">
                       <Bell className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -1078,28 +1153,46 @@ username:s:Administrator`;
                     <ScrollArea className="h-64">
                       <div>
                         {notifications.map((notification, index) => (
-                          <div key={index} className="p-4 border-b last:border-b-0 hover:bg-muted/50">
+                          <div
+                            key={index}
+                            className="p-4 border-b last:border-b-0 hover:bg-muted/50"
+                          >
                             <div className="flex items-start gap-3">
                               <div className="flex-shrink-0 mt-0.5">
-                                {notification.status === 'manual_review' && <AlertCircle className="h-4 w-4 text-orange-500" />}
-                                {notification.status === 'completed' && <CheckCircle className="h-4 w-4 text-green-500" />}
-                                {notification.status === 'failed' && <XCircle className="h-4 w-4 text-red-500" />}
-                                {notification.status === 'running' && <Activity className="h-4 w-4 text-blue-500" />}
-                                {notification.status === 'pending' && <Clock className="h-4 w-4 text-yellow-500" />}
-                                {notification.status === 'preparing' && <RefreshCw className="h-4 w-4 text-purple-500" />}
+                                {notification.status === "completed" && (
+                                  <CheckCircle className="h-4 w-4 text-green-500" />
+                                )}
+                                {notification.status === "failed" && (
+                                  <XCircle className="h-4 w-4 text-red-500" />
+                                )}
+                                {notification.status === "running" && (
+                                  <Activity className="h-4 w-4 text-blue-500" />
+                                )}
+                                {notification.status === "pending" && (
+                                  <Clock className="h-4 w-4 text-yellow-500" />
+                                )}
+                                {notification.status === "preparing" && (
+                                  <RefreshCw className="h-4 w-4 text-purple-500" />
+                                )}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium">{notification.message}</p>
+                                <p className="text-sm font-medium">
+                                  {notification.message}
+                                </p>
                                 {notification.ip && (
-                                  <p className="text-xs text-muted-foreground">IP: {notification.ip}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    IP: {notification.ip}
+                                  </p>
                                 )}
                                 <p className="text-xs text-muted-foreground">
-                                  {new Date(notification.timestamp).toLocaleString('id-ID', {
-                                    timeZone: 'Asia/Jakarta',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    day: 'numeric',
-                                    month: 'short'
+                                  {new Date(
+                                    notification.timestamp,
+                                  ).toLocaleString("id-ID", {
+                                    timeZone: "Asia/Jakarta",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    day: "numeric",
+                                    month: "short",
                                   })}
                                 </p>
                               </div>
@@ -1114,7 +1207,7 @@ username:s:Administrator`;
             </div>
 
             <ThemeToggle />
-            
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="flex items-center gap-2">
@@ -1132,14 +1225,17 @@ username:s:Administrator`;
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => setActiveTab('settings')}
+                  onClick={() => setActiveTab("settings")}
                   className="cursor-pointer"
                 >
                   <Settings className="h-4 w-4 mr-2" />
                   Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-destructive">
+                <DropdownMenuItem
+                  onClick={handleLogout}
+                  className="cursor-pointer text-destructive"
+                >
                   <LogOut className="h-4 w-4 mr-2" />
                   Logout
                 </DropdownMenuItem>
@@ -1151,13 +1247,14 @@ username:s:Administrator`;
 
       <div className="flex">
         {/* Fixed Sidebar */}
-        <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-background border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}>
+        <aside
+          className={`fixed inset-y-0 left-0 z-40 w-64 bg-background border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+            sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
           <div className="flex flex-col h-full">
             {/* Sidebar Header Spacer */}
-            <div className="h-16 md:h-20 flex items-center px-6">
-            </div>
+            <div className="h-16 md:h-20 flex items-center px-6"></div>
 
             {/* Sidebar Content */}
             <div className="flex-1 flex flex-col min-h-0">
@@ -1167,7 +1264,7 @@ username:s:Administrator`;
                     {menuItems.map((item) => {
                       const Icon = item.icon;
                       const isActive = activeTab === item.id;
-                      
+
                       return (
                         <button
                           key={item.id}
@@ -1177,8 +1274,8 @@ username:s:Administrator`;
                           }}
                           className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                             isActive
-                              ? 'bg-primary text-primary-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:text-foreground hover:bg-accent"
                           }`}
                         >
                           <Icon className="h-4 w-4" />
@@ -1189,17 +1286,21 @@ username:s:Administrator`;
                   </nav>
                 </div>
               </ScrollArea>
-              
+
               {/* Quota Card in Sidebar */}
               <div className="p-4 border-t">
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-center">
-                      <p className="text-sm font-medium text-muted-foreground mb-1">Current Quota</p>
-                      <p className="text-2xl font-bold text-foreground mb-3">{dashboardData.stats.quota || 0}</p>
-                      <Button 
+                      <p className="text-sm font-medium text-muted-foreground mb-1">
+                        Current Quota
+                      </p>
+                      <p className="text-2xl font-bold text-foreground mb-3">
+                        {dashboardData.stats.quota || 0}
+                      </p>
+                      <Button
                         onClick={() => setShowTopupModal(true)}
-                        size="sm" 
+                        size="sm"
                         className="w-full"
                       >
                         <Plus className="h-4 w-4 mr-2" />
@@ -1215,7 +1316,7 @@ username:s:Administrator`;
 
         {/* Overlay for mobile */}
         {sidebarOpen && (
-          <div 
+          <div
             className="fixed inset-0 z-30 bg-black/50 lg:hidden"
             onClick={() => setSidebarOpen(false)}
           />
@@ -1225,14 +1326,15 @@ username:s:Administrator`;
         <main className="flex-1 lg:ml-64 pt-20">
           <div className="container mx-auto px-6 pt-2 pb-6 md:py-8">
             {/* Dashboard Tab */}
-            {activeTab === 'dashboard' && (
+            {activeTab === "dashboard" && (
               <div className="space-y-6">
                 {/* Welcome Section */}
                 <div className="mb-8">
                   <div className="flex items-center justify-between mb-4">
                     <div>
                       <h2 className="text-2xl md:text-3xl font-bold text-foreground">
-                        Welcome back, {user.profile?.first_name || user.username}!
+                        Welcome back,{" "}
+                        {user.profile?.first_name || user.username}!
                       </h2>
                       <p className="text-xs md:text-sm text-muted-foreground">
                         Manage your Windows installations
@@ -1240,9 +1342,7 @@ username:s:Administrator`;
                     </div>
                     <div className="flex items-center gap-2">
                       {!user.is_verified && (
-                        <Badge variant="destructive">
-                          Email not verified
-                        </Badge>
+                        <Badge variant="destructive">Email not verified</Badge>
                       )}
                       {user.admin === 1 && (
                         <Badge variant="secondary">
@@ -1258,8 +1358,12 @@ username:s:Administrator`;
                     <Alert className="mb-6 border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-950/30">
                       <AlertCircle className="h-4 w-4 text-yellow-600" />
                       <AlertDescription className="text-yellow-800 dark:text-yellow-200">
-                        Please verify your email address to access all features.{' '}
-                        <Button variant="link" className="p-0 h-auto text-yellow-800 dark:text-yellow-200" asChild>
+                        Please verify your email address to access all features.{" "}
+                        <Button
+                          variant="link"
+                          className="p-0 h-auto text-yellow-800 dark:text-yellow-200"
+                          asChild
+                        >
                           <Link to="/verify-email">Verify now</Link>
                         </Button>
                       </AlertDescription>
@@ -1273,8 +1377,12 @@ username:s:Administrator`;
                     <CardContent className="p-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-xs md:text-sm font-medium text-muted-foreground">Total VPS</p>
-                          <p className="text-2xl font-bold text-foreground">{dashboardData.stats.totalVPS}</p>
+                          <p className="text-xs md:text-sm font-medium text-muted-foreground">
+                            Total VPS
+                          </p>
+                          <p className="text-2xl font-bold text-foreground">
+                            {dashboardData.stats.totalVPS}
+                          </p>
                         </div>
                         <div className="h-12 w-12 bg-primary/10 rounded-lg flex items-center justify-center">
                           <Server className="h-6 w-6 text-primary" />
@@ -1287,8 +1395,12 @@ username:s:Administrator`;
                     <CardContent className="p-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-xs md:text-sm font-medium text-muted-foreground">Active Install</p>
-                          <p className="text-2xl font-bold text-foreground">{dashboardData.stats.activeConnections}</p>
+                          <p className="text-xs md:text-sm font-medium text-muted-foreground">
+                            Active Install
+                          </p>
+                          <p className="text-2xl font-bold text-foreground">
+                            {dashboardData.stats.activeConnections}
+                          </p>
                         </div>
                         <div className="h-12 w-12 bg-green-500/10 rounded-lg flex items-center justify-center">
                           <Activity className="h-6 w-6 text-green-600 dark:text-green-400" />
@@ -1297,12 +1409,16 @@ username:s:Administrator`;
                     </CardContent>
                   </Card>
 
-                  <Card className='col-span-2 md:col-span-1'>
+                  <Card className="col-span-2 md:col-span-1">
                     <CardContent className="p-6">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-xs md:text-sm font-medium text-muted-foreground">Success Rate</p>
-                          <p className="text-2xl font-bold text-foreground">{dashboardData.stats.successRate}</p>
+                          <p className="text-xs md:text-sm font-medium text-muted-foreground">
+                            Success Rate
+                          </p>
+                          <p className="text-2xl font-bold text-foreground">
+                            {dashboardData.stats.successRate}
+                          </p>
                         </div>
                         <div className="h-12 w-12 bg-purple-500/10 rounded-lg flex items-center justify-center">
                           <TrendingUp className="h-6 w-6 text-purple-600 dark:text-purple-400" />
@@ -1318,12 +1434,14 @@ username:s:Administrator`;
                   <Card>
                     <CardHeader>
                       <CardTitle>Quick Actions</CardTitle>
-                      <CardDescription>Common tasks and shortcuts</CardDescription>
+                      <CardDescription>
+                        Common tasks and shortcuts
+                      </CardDescription>
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-4">
-                        <Button 
-                          onClick={() => setActiveTab('install')}
+                        <Button
+                          onClick={() => setActiveTab("install")}
                           className="w-full justify-start h-16"
                           variant="outline"
                         >
@@ -1333,12 +1451,14 @@ username:s:Administrator`;
                             </div>
                             <div className="text-left">
                               <p className="font-medium">Install Windows</p>
-                              <p className="text-xs md:text-sm text-muted-foreground">Create new installation</p>
+                              <p className="text-xs md:text-sm text-muted-foreground">
+                                Create new installation
+                              </p>
                             </div>
                           </div>
                         </Button>
-                        
-                        <Button 
+
+                        <Button
                           onClick={() => setShowTopupModal(true)}
                           className="w-full justify-start h-16"
                           variant="outline"
@@ -1349,11 +1469,12 @@ username:s:Administrator`;
                             </div>
                             <div className="text-left">
                               <p className="font-medium">Topup Quota</p>
-                              <p className="text-xs md:text-sm text-muted-foreground">Add more quota</p>
+                              <p className="text-xs md:text-sm text-muted-foreground">
+                                Add more quota
+                              </p>
                             </div>
                           </div>
                         </Button>
-                        
                       </div>
                     </CardContent>
                   </Card>
@@ -1367,34 +1488,48 @@ username:s:Administrator`;
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      {dashboardData.recentActivity && dashboardData.recentActivity.length === 0 ? (
+                      {dashboardData.recentActivity &&
+                      dashboardData.recentActivity.length === 0 ? (
                         <div className="text-center py-8">
                           <Server className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                          <p className="text-muted-foreground">No installations yet</p>
-                          <p className="text-sm text-muted-foreground">Start by installing Windows on your VPS</p>
+                          <p className="text-muted-foreground">
+                            No installations yet
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            Start by installing Windows on your VPS
+                          </p>
                         </div>
                       ) : (
                         <div className="space-y-4">
                           <div className="space-y-3">
-                            {(dashboardData.recentActivity || installHistory).slice(0, 2).map((install: any) => (
-                              <div key={install.id} className="flex items-center justify-between p-3 border rounded-lg">
-                                <div className="flex items-center gap-3">
-                                  <Monitor className="h-4 w-4 text-muted-foreground" />
-                                  <div>
-                                    <p className="font-medium">{install.ip}</p>
-                                    <p className="text-sm text-muted-foreground">{install.win_ver}</p>
+                            {(dashboardData.recentActivity || installHistory)
+                              .slice(0, 2)
+                              .map((install: any) => (
+                                <div
+                                  key={install.id}
+                                  className="flex items-center justify-between p-3 border rounded-lg"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <Monitor className="h-4 w-4 text-muted-foreground" />
+                                    <div>
+                                      <p className="font-medium">
+                                        {install.ip}
+                                      </p>
+                                      <p className="text-sm text-muted-foreground">
+                                        {install.win_ver}
+                                      </p>
+                                    </div>
                                   </div>
+                                  {getStatusBadge(install.status)}
                                 </div>
-                                {getStatusBadge(install.status)}
-                              </div>
-                            ))}
+                              ))}
                           </div>
                           {installHistory.length > 2 && (
                             <div className="pt-3 border-t">
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => setActiveTab('install-history')}
+                                onClick={() => setActiveTab("install-history")}
                                 className="w-full"
                               >
                                 <History className="h-4 w-4 mr-2" />
@@ -1411,250 +1546,207 @@ username:s:Administrator`;
             )}
 
             {/* Install Windows Tab */}
-            {activeTab === 'install' && (
+            {activeTab === "install" && (
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-2xl font-bold text-foreground mb-2">Install Windows</h2>
-                  <p className="text-xs md:text-sm text-muted-foreground">Transform your Linux VPS into a Windows RDP environment</p>
+                  <h2 className="text-2xl font-bold text-foreground mb-2">
+                    Install Windows
+                  </h2>
+                  <p className="text-xs md:text-sm text-muted-foreground">
+                    Transform your Linux VPS into a Windows RDP environment
+                  </p>
                 </div>
 
                 <Card>
-                  <CardContent className='pt-2'>
+                  <CardHeader>
+                    <CardTitle>Installation Details</CardTitle>
+                    <CardDescription>
+                      Fill in the details for your Windows installation
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
                     {dashboardData.stats.quota <= 0 ? (
                       <Alert>
                         <div className="flex items-start space-x-3">
                           <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
                           <AlertDescription>
-                            You don't have enough quota to install Windows. Please top up your quota first.
-                            <Button 
+                            You don't have enough quota to install Windows.
+                            Please top up your quota first.
+                            <Button
                               onClick={() => setShowTopupModal(true)}
-                              variant="link" 
+                              variant="link"
                               className="p-0 ml-2 h-auto"
                             >
                               Top up now
                             </Button>
                           </AlertDescription>
-                          </div>
+                        </div>
                       </Alert>
                     ) : (
-                      <form onSubmit={handleSubmit(onInstallSubmit)} className="space-y-6">
-                        {/* VPS Connection Details */}
-                        <div className="space-y-6">
-                          <div>
-                            <h3 className="text-lg font-semibold text-foreground">VPS Connection Details</h3>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              Configure your VPS connection settings
-                            </p>
-                          </div>
-                          
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {/* VPS IP Address */}
-                            <div className="space-y-3">
-                              <Label htmlFor="ip" className="text-sm font-medium">
-                                VPS IP Address *
-                              </Label>
-                                <Input
-                                  id="ip"
-                                  placeholder="192.168.1.100 or 192.168.1.100:2222"
-                                  {...register('ip')}
-                                  className={errors.ip ? 'border-destructive' : ''}
-                                />
-                                {errors.ip && (
-                                  <p className="text-sm text-destructive">{errors.ip.message}</p>
-                                )}
-                                <p className="text-xs text-muted-foreground">
-                                  Use IP only (default port 22) or IP:port for custom SSH port. Ubuntu 22 is recommended.
-                                </p>
-                              </div>
-
-                            {/* Authentication Method */}
-                            <div className="space-y-3">
-                              <Label className="text-sm font-medium">Authentication Method *</Label>
-                                <RadioGroup
-                                  defaultValue="password"
-                                  onValueChange={(value: 'password' | 'ssh_key') => {
-                                    setAuthType(value);
-                                    setValue('auth_type', value);
-                                  }}
-                                  className="space-y-4"
-                                >
-                                  {/* Password Authentication */}
-                                  <div className="space-y-3">
-                                    <div className="flex items-center space-x-2">
-                                      <RadioGroupItem value="password" id="auth-password" />
-                                      <Label htmlFor="auth-password" className="text-sm font-medium">
-                                        Password Authentication
-                                      </Label>
-                                    </div>
-                                    
-                                    {watchedAuthType === 'password' && (
-                                      <div className="ml-6 space-y-2">
-                                          <div className="relative">
-                                            <Input
-                                              id="passwd_vps"
-                                              type={showVpsPassword ? 'text' : 'password'}
-                                              placeholder="Your VPS root password"
-                                              {...register('passwd_vps')}
-                                              className={errors.passwd_vps ? 'border-destructive pr-10' : 'pr-10'}
-                                            />
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              size="sm"
-                                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                              onClick={() => setShowVpsPassword(!showVpsPassword)}
-                                            >
-                                              {showVpsPassword ? (
-                                                <EyeOff className="h-4 w-4 text-muted-foreground" />
-                                              ) : (
-                                                <Eye className="h-4 w-4 text-muted-foreground" />
-                                              )}
-                                            </Button>
-                                          </div>
-                                          {errors.passwd_vps && (
-                                            <p className="text-sm text-destructive">{errors.passwd_vps.message}</p>
-                                          )}
-                                          <p className="text-xs text-muted-foreground">
-                                            Enter your VPS root password
-                                          </p>
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {/* SSH Key Authentication */}
-                                  <div className="space-y-3">
-                                    <div className="flex items-center space-x-2">
-                                      <RadioGroupItem value="ssh_key" id="auth-ssh-key" />
-                                      <Label htmlFor="auth-ssh-key" className="text-sm font-medium">
-                                        SSH Key Authentication
-                                      </Label>
-                                    </div>
-                                    
-                                    {watchedAuthType === 'ssh_key' && (
-                                      <div className="ml-6 space-y-2">
-                                          <Input
-                                            id="ssh_key_file"
-                                            type="file"
-                                            accept=".pem,.key,.ppk,.openssh,*"
-                                            onChange={handleSshKeyFileChange}
-                                            className={errors.ssh_key_file ? 'border-destructive' : ''}
-                                          />
-                                          {sshKeyFile && sshKeyFile instanceof File && (
-                                            <div className="text-sm text-muted-foreground">
-                                              Selected: {sshKeyFile.name} ({(sshKeyFile.size / 1024).toFixed(2)} KB)
-                                            </div>
-                                          )}
-                                          {errors.ssh_key_file && (
-                                            <p className="text-sm text-destructive">
-                                              {typeof errors.ssh_key_file === 'string'
-                                                ? errors.ssh_key_file
-                                                : errors.ssh_key_file.message || 'SSH key file is required'}
-                                            </p>
-                                          )}
-                                          <p className="text-xs text-muted-foreground">
-                                            Upload your SSH private key file. Supports OpenSSH, RSA, PEM, PPK formats.
-                                          </p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </RadioGroup>
-                              </div>
-                          </div>
-                        </div>
-
-                        {/* Windows Configuration */}
-                        <div className="space-y-6">
-                          <div>
-                            <h3 className="text-lg font-semibold text-foreground">Windows Configuration</h3>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              Configure your Windows installation settings
-                            </p>
-                          </div>
-                          
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {/* Windows Version */}
-                            <div className="space-y-3">
-                              <Label htmlFor="win_ver" className="text-sm font-medium">
-                                Windows Version *
-                              </Label>
-                              <Select onValueChange={(value) => setValue('win_ver', value)}>
-                                <SelectTrigger className={errors.win_ver ? 'border-destructive' : ''}>
-                                  <SelectValue placeholder="Select Windows version" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {windowsVersions.map((version) => (
-                                    <SelectItem key={version.id} value={version.slug}>
-                                      {version.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              {errors.win_ver && (
-                                <p className="text-sm text-destructive">{errors.win_ver.message}</p>
-                              )}
-                              <p className="text-xs text-muted-foreground">
-                                Choose the Windows version you want to install
+                      <form
+                        onSubmit={handleSubmit(onInstallSubmit)}
+                        className="space-y-6"
+                      >
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-2">
+                            <Label htmlFor="ip">VPS IP Address *</Label>
+                            <Input
+                              id="ip"
+                              placeholder="192.168.1.100"
+                              {...register("ip")}
+                              className={errors.ip ? "border-destructive" : ""}
+                            />
+                            {errors.ip && (
+                              <p className="text-sm text-destructive">
+                                {errors.ip.message}
                               </p>
-                            </div>
-
-                            {/* RDP Password */}
-                            <div className="space-y-3">
-                              <Label htmlFor="passwd_rdp" className="text-sm font-medium">
-                                RDP Password *
-                              </Label>
-                              <div className="relative">
-                                <Input
-                                  id="passwd_rdp"
-                                  type={showRdpPassword ? 'text' : 'password'}
-                                  placeholder="Windows RDP password"
-                                  {...register('passwd_rdp')}
-                                  className={errors.passwd_rdp ? 'border-destructive pr-10' : 'pr-10'}
-                                />
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                  onClick={() => setShowRdpPassword(!showRdpPassword)}
-                                >
-                                  {showRdpPassword ? (
-                                    <EyeOff className="h-4 w-4 text-muted-foreground" />
-                                  ) : (
-                                    <Eye className="h-4 w-4 text-muted-foreground" />
-                                  )}
-                                </Button>
-                              </div>
-                              {errors.passwd_rdp && (
-                                <p className="text-sm text-destructive">{errors.passwd_rdp.message}</p>
-                              )}
-                              <p className="text-xs text-muted-foreground">
-                                Password for Windows RDP access. Cannot start with #
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Submit Button */}
-                        <div className="pt-4">
-                          <Button 
-                            type="submit" 
-                            className="w-full"
-                            disabled={isSubmitting || dashboardData.stats.quota <= 0}
-                            size="lg"
-                          >
-                            {isSubmitting ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Starting Installation...
-                              </>
-                            ) : (
-                              <>
-                                <Plus className="mr-2 h-4 w-4" />
-                                Start Installation (1 Quota)
-                              </>
                             )}
-                          </Button>
+                            <p className="text-xs text-muted-foreground">
+                              default port SSH is 22 - Ubuntu 22.04 is Recommended.
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <Label htmlFor="passwd_vps">
+                                VPS Root Password *
+                              </Label>
+                              <Button
+                                type="button"
+                                variant="link"
+                                className="p-0 h-auto text-xs text-blue-600 hover:text-blue-800"
+                                onClick={() => setShowRootPasswordHelp(true)}
+                              >
+                                How to create root password
+                              </Button>
+                            </div>
+                            <div className="relative">
+                              <Input
+                                id="passwd_vps"
+                                type={showVpsPassword ? "text" : "password"}
+                                placeholder="Your VPS root password"
+                                {...register("passwd_vps")}
+                                className={
+                                  errors.passwd_vps
+                                    ? "border-destructive pr-10"
+                                    : "pr-10"
+                                }
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                onClick={() =>
+                                  setShowVpsPassword(!showVpsPassword)
+                                }
+                              >
+                                {showVpsPassword ? (
+                                  <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                ) : (
+                                  <Eye className="h-4 w-4 text-muted-foreground" />
+                                )}
+                              </Button>
+                            </div>
+                            {errors.passwd_vps && (
+                              <p className="text-sm text-destructive">
+                                {errors.passwd_vps.message}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="win_ver">Windows Version *</Label>
+                            <Select
+                              onValueChange={(value) =>
+                                setValue("win_ver", value)
+                              }
+                            >
+                              <SelectTrigger
+                                className={
+                                  errors.win_ver ? "border-destructive" : ""
+                                }
+                              >
+                                <SelectValue placeholder="Select Windows version" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {windowsVersions.map((version) => (
+                                  <SelectItem
+                                    key={version.id}
+                                    value={version.slug}
+                                  >
+                                    {version.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {errors.win_ver && (
+                              <p className="text-sm text-destructive">
+                                {errors.win_ver.message}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="passwd_rdp">RDP Password *</Label>
+                            <div className="relative">
+                              <Input
+                                id="passwd_rdp"
+                                type={showRdpPassword ? "text" : "password"}
+                                placeholder="Windows RDP password"
+                                {...register("passwd_rdp")}
+                                className={
+                                  errors.passwd_rdp
+                                    ? "border-destructive pr-10"
+                                    : "pr-10"
+                                }
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                onClick={() =>
+                                  setShowRdpPassword(!showRdpPassword)
+                                }
+                              >
+                                {showRdpPassword ? (
+                                  <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                ) : (
+                                  <Eye className="h-4 w-4 text-muted-foreground" />
+                                )}
+                              </Button>
+                            </div>
+                            {errors.passwd_rdp && (
+                              <p className="text-sm text-destructive">
+                                {errors.passwd_rdp.message}
+                              </p>
+                            )}
+                            <p className="text-xs text-muted-foreground">
+                              Cannot start with #
+                            </p>
+                          </div>
                         </div>
+
+                        <Button
+                          type="submit"
+                          className="w-full"
+                          disabled={
+                            isSubmitting || dashboardData.stats.quota <= 0
+                          }
+                        >
+                          {isSubmitting ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Starting Installation...
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="mr-2 h-4 w-4" />
+                              Start Installation (1 Quota)
+                            </>
+                          )}
+                        </Button>
                       </form>
                     )}
                   </CardContent>
@@ -1663,12 +1755,16 @@ username:s:Administrator`;
             )}
 
             {/* Install History Tab */}
-            {activeTab === 'install-history' && (
+            {activeTab === "install-history" && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-2xl font-bold text-foreground mb-2">Install History</h2>
-                    <p className="text-xs md:text-sm text-muted-foreground">View your Windows installation history</p>
+                    <h2 className="text-2xl font-bold text-foreground mb-2">
+                      Install History
+                    </h2>
+                    <p className="text-xs md:text-sm text-muted-foreground">
+                      View your Windows installation history
+                    </p>
                   </div>
                   <Button onClick={loadData} variant="outline">
                     <RefreshCw className="h-4 w-4 mr-2" />
@@ -1681,13 +1777,13 @@ username:s:Administrator`;
                     {installHistory.length === 0 ? (
                       <div className="text-center py-8">
                         <Monitor className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                        <p className="text-muted-foreground mb-2">No installations yet</p>
+                        <p className="text-muted-foreground mb-2">
+                          No installations yet
+                        </p>
                         <p className="text-sm text-muted-foreground mb-4">
                           Your installation history will appear here
                         </p>
-                        <Button 
-                          onClick={() => setActiveTab('install')} 
-                        >
+                        <Button onClick={() => setActiveTab("install")}>
                           Create Your First Install
                         </Button>
                       </div>
@@ -1705,35 +1801,54 @@ username:s:Administrator`;
                                   <TableHead>Status</TableHead>
                                   <TableHead>Created</TableHead>
                                   <TableHead>Updated</TableHead>
-                                  <TableHead className="w-24">Actions</TableHead>
+                                  <TableHead className="w-24">
+                                    Actions
+                                  </TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {paginatedInstallHistory.map((install, index) => (
-                                  <TableRow key={install.id}>
-                                    <TableCell className="font-medium">
-                                      {(installHistoryPage - 1) * ITEMS_PER_PAGE + index + 1}
-                                    </TableCell>
-                                    <TableCell className="font-mono">{install.ip}</TableCell>
-                                    <TableCell>{getWindowsVersionName(install.win_ver)}</TableCell>
-                                    <TableCell>{getStatusBadge(install.status)}</TableCell>
-                                    <TableCell>{formatDate(install.created_at)}</TableCell>
-                                    <TableCell>{formatDate(install.updated_at)}</TableCell>
-                                    <TableCell>
-                                      {install.status === 'completed' && (
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={() => handleRDPConnect(install)}
-                                          className="h-8"
-                                        >
-                                          <ExternalLink className="h-3 w-3 mr-1" />
-                                          Connect
-                                        </Button>
-                                      )}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
+                                {paginatedInstallHistory.map(
+                                  (install, index) => (
+                                    <TableRow key={install.id}>
+                                      <TableCell className="font-medium">
+                                        {(installHistoryPage - 1) *
+                                          ITEMS_PER_PAGE +
+                                          index +
+                                          1}
+                                      </TableCell>
+                                      <TableCell className="font-mono">
+                                        {install.ip}
+                                      </TableCell>
+                                      <TableCell>
+                                        {getWindowsVersionName(install.win_ver)}
+                                      </TableCell>
+                                      <TableCell>
+                                        {getStatusBadge(install.status)}
+                                      </TableCell>
+                                      <TableCell>
+                                        {formatDate(install.created_at)}
+                                      </TableCell>
+                                      <TableCell>
+                                        {formatDate(install.updated_at)}
+                                      </TableCell>
+                                      <TableCell>
+                                        {install.status === "completed" && (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() =>
+                                              handleRDPConnect(install)
+                                            }
+                                            className="h-8"
+                                          >
+                                            <ExternalLink className="h-3 w-3 mr-1" />
+                                            Connect
+                                          </Button>
+                                        )}
+                                      </TableCell>
+                                    </TableRow>
+                                  ),
+                                )}
                               </TableBody>
                             </Table>
                           </ScrollArea>
@@ -1748,34 +1863,59 @@ username:s:Administrator`;
                                   <CardContent className="p-4">
                                     <div className="flex items-start justify-between mb-3">
                                       <div className="flex items-center gap-2">
-                                        <Badge variant="outline" className="text-xs">
-                                          #{(installHistoryPage - 1) * ITEMS_PER_PAGE + index + 1}
+                                        <Badge
+                                          variant="outline"
+                                          className="text-xs"
+                                        >
+                                          #
+                                          {(installHistoryPage - 1) *
+                                            ITEMS_PER_PAGE +
+                                            index +
+                                            1}
                                         </Badge>
-                                        <span className="font-mono text-sm font-medium">{install.ip}</span>
+                                        <span className="font-mono text-sm font-medium">
+                                          {install.ip}
+                                        </span>
                                       </div>
                                       {getStatusBadge(install.status)}
                                     </div>
-                                    
+
                                     <div className="space-y-2 text-sm">
                                       <div className="flex justify-between">
-                                        <span className="text-muted-foreground">Windows:</span>
-                                        <span className="font-medium">{getWindowsVersionName(install.win_ver)}</span>
+                                        <span className="text-muted-foreground">
+                                          Windows:
+                                        </span>
+                                        <span className="font-medium">
+                                          {getWindowsVersionName(
+                                            install.win_ver,
+                                          )}
+                                        </span>
                                       </div>
                                       <div className="flex justify-between">
-                                        <span className="text-muted-foreground">Created:</span>
-                                        <span>{formatDate(install.created_at)}</span>
+                                        <span className="text-muted-foreground">
+                                          Created:
+                                        </span>
+                                        <span>
+                                          {formatDate(install.created_at)}
+                                        </span>
                                       </div>
                                       <div className="flex justify-between">
-                                        <span className="text-muted-foreground">Updated:</span>
-                                        <span>{formatDate(install.updated_at)}</span>
+                                        <span className="text-muted-foreground">
+                                          Updated:
+                                        </span>
+                                        <span>
+                                          {formatDate(install.updated_at)}
+                                        </span>
                                       </div>
                                     </div>
-                                    
-                                    {install.status === 'completed' && (
+
+                                    {install.status === "completed" && (
                                       <div className="mt-3 pt-3 border-t">
                                         <Button
                                           size="sm"
-                                          onClick={() => handleRDPConnect(install)}
+                                          onClick={() =>
+                                            handleRDPConnect(install)
+                                          }
                                           className="w-full"
                                         >
                                           <ExternalLink className="h-4 w-4 mr-2" />
@@ -1789,8 +1929,12 @@ username:s:Administrator`;
                             </div>
                           </ScrollArea>
                         </div>
-                        
-                        {renderPagination(installHistoryPage, installHistory.length, setInstallHistoryPage)}
+
+                        {renderPagination(
+                          installHistoryPage,
+                          installHistory.length,
+                          setInstallHistoryPage,
+                        )}
                       </>
                     )}
                   </CardContent>
@@ -1799,15 +1943,19 @@ username:s:Administrator`;
             )}
 
             {/* Topup History Tab */}
-            {activeTab === 'topup-history' && (
+            {activeTab === "topup-history" && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-2xl font-bold text-foreground mb-2">Topup History</h2>
-                    <p className="text-xs md:text-sm text-muted-foreground">View your quota topup transaction history</p>
+                    <h2 className="text-2xl font-bold text-foreground mb-2">
+                      Topup History
+                    </h2>
+                    <p className="text-xs md:text-sm text-muted-foreground">
+                      View your quota topup transaction history
+                    </p>
                   </div>
                   <div className="flex gap-2">
-                    <Button 
+                    <Button
                       variant="outline"
                       onClick={loadTopupHistory}
                       disabled={isLoadingTopup}
@@ -1831,7 +1979,9 @@ username:s:Administrator`;
                     ) : topupHistory.length === 0 ? (
                       <div className="text-center py-8">
                         <History className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                        <p className="text-muted-foreground mb-2">No transactions found</p>
+                        <p className="text-muted-foreground mb-2">
+                          No transactions found
+                        </p>
                         <p className="text-sm text-muted-foreground mb-4">
                           Your topup history will appear here
                         </p>
@@ -1841,7 +1991,10 @@ username:s:Administrator`;
                         <ScrollArea className="h-[440px]">
                           <div className="space-y-3 pr-4">
                             {paginatedTopupHistory.map((transaction) => (
-                              <Card key={transaction.id} className="hover:shadow-md transition-shadow">
+                              <Card
+                                key={transaction.id}
+                                className="hover:shadow-md transition-shadow"
+                              >
                                 <CardContent className="p-4">
                                   <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-3">
@@ -1849,9 +2002,13 @@ username:s:Administrator`;
                                         <CreditCard className="h-5 w-5 text-primary" />
                                       </div>
                                       <div>
-                                        <p className="font-medium">{transaction.quantity} Quota Purchase</p>
+                                        <p className="font-medium">
+                                          {transaction.quantity} Quota Purchase
+                                        </p>
                                         <p className="text-sm text-muted-foreground">
-                                          {formatCurrency(transaction.final_amount)}
+                                          {formatCurrency(
+                                            transaction.final_amount,
+                                          )}
                                         </p>
                                       </div>
                                     </div>
@@ -1868,14 +2025,18 @@ username:s:Administrator`;
                                       <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => handleViewDetails(transaction)}
+                                        onClick={() =>
+                                          handleViewDetails(transaction)
+                                        }
                                       >
                                         View Details
                                       </Button>
                                       {isTransactionPayable(transaction) && (
                                         <Button
                                           size="sm"
-                                          onClick={() => handlePayTransaction(transaction)}
+                                          onClick={() =>
+                                            handlePayTransaction(transaction)
+                                          }
                                           className="bg-green-600 hover:bg-green-700"
                                         >
                                           <CreditCard className="h-4 w-4 mr-1" />
@@ -1889,8 +2050,12 @@ username:s:Administrator`;
                             ))}
                           </div>
                         </ScrollArea>
-                        
-                        {renderPagination(topupHistoryPage, topupHistory.length, setTopupHistoryPage)}
+
+                        {renderPagination(
+                          topupHistoryPage,
+                          topupHistory.length,
+                          setTopupHistoryPage,
+                        )}
                       </>
                     )}
                   </CardContent>
@@ -1899,11 +2064,15 @@ username:s:Administrator`;
             )}
 
             {/* Settings Tab */}
-            {activeTab === 'settings' && (
+            {activeTab === "settings" && (
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-2xl font-bold text-foreground mb-2">Settings</h2>
-                  <p className="text-xs md:text-sm text-muted-foreground">Manage your account settings and preferences</p>
+                  <h2 className="text-2xl font-bold text-foreground mb-2">
+                    Settings
+                  </h2>
+                  <p className="text-xs md:text-sm text-muted-foreground">
+                    Manage your account settings and preferences
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1919,26 +2088,41 @@ username:s:Administrator`;
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <form onSubmit={handleUpdatePassword} className="space-y-4">
+                      <form
+                        onSubmit={handleUpdatePassword}
+                        className="space-y-4"
+                      >
                         <div>
-                          <Label htmlFor="currentPassword">Current Password</Label>
+                          <Label htmlFor="currentPassword">
+                            Current Password
+                          </Label>
                           <Input
                             id="currentPassword"
                             type="password"
                             value={passwordForm.currentPassword}
-                            onChange={(e) => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                            onChange={(e) =>
+                              setPasswordForm((prev) => ({
+                                ...prev,
+                                currentPassword: e.target.value,
+                              }))
+                            }
                             placeholder="Enter your current password"
                             required
                           />
                         </div>
-                        
+
                         <div>
                           <Label htmlFor="newPassword">New Password</Label>
                           <Input
                             id="newPassword"
                             type="password"
                             value={passwordForm.newPassword}
-                            onChange={(e) => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                            onChange={(e) =>
+                              setPasswordForm((prev) => ({
+                                ...prev,
+                                newPassword: e.target.value,
+                              }))
+                            }
                             placeholder="Enter new password"
                             required
                             minLength={6}
@@ -1947,23 +2131,35 @@ username:s:Administrator`;
                             Password must be at least 6 characters long
                           </p>
                         </div>
-                        
+
                         <div>
-                          <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                          <Label htmlFor="confirmPassword">
+                            Confirm New Password
+                          </Label>
                           <Input
                             id="confirmPassword"
                             type="password"
                             value={passwordForm.confirmPassword}
-                            onChange={(e) => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                            onChange={(e) =>
+                              setPasswordForm((prev) => ({
+                                ...prev,
+                                confirmPassword: e.target.value,
+                              }))
+                            }
                             placeholder="Confirm your new password"
                             required
                           />
                         </div>
-                        
+
                         <Button
                           type="submit"
                           className="w-full"
-                          disabled={isUpdatingPassword || !passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword}
+                          disabled={
+                            isUpdatingPassword ||
+                            !passwordForm.currentPassword ||
+                            !passwordForm.newPassword ||
+                            !passwordForm.confirmPassword
+                          }
                         >
                           {isUpdatingPassword ? (
                             <>
@@ -1995,70 +2191,86 @@ username:s:Administrator`;
                     <CardContent className="space-y-4">
                       {user.telegram ? (
                         <div className="space-y-4">
-                        <div className="flex items-center justify-between p-4 border rounded-lg bg-green-50 dark:bg-green-950/20">
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 bg-green-500/10 rounded-full flex items-center justify-center">
-                              <CheckCircle className="h-5 w-5 text-green-600" />
-                            </div>
-                            <div>
-                              <p className="font-medium text-green-900 dark:text-green-100">Telegram Connected</p>
-                              <p className="text-sm text-green-600 dark:text-green-300">
-                                {user.telegram_display_name ? (
-                                  <>
-                                    {user.telegram_display_name} {user.telegram && `(@${user.telegram})`}
-                                  </>
-                                ) : (
-                                  `@${user.telegram}`
-                                )}
-                              </p>
-                              {user.telegram_user_id && (
-                                <p className="text-xs text-green-500 dark:text-green-400">
-                                  ID: {user.telegram_user_id}
+                          <div className="flex items-center justify-between p-4 border rounded-lg bg-green-50 dark:bg-green-950/20">
+                            <div className="flex items-center gap-3">
+                              <div className="h-10 w-10 bg-green-500/10 rounded-full flex items-center justify-center">
+                                <CheckCircle className="h-5 w-5 text-green-600" />
+                              </div>
+                              <div>
+                                <p className="font-medium text-green-900 dark:text-green-100">
+                                  Telegram Connected
                                 </p>
-                              )}
+                                <p className="text-sm text-green-600 dark:text-green-300">
+                                  {user.telegram_display_name ? (
+                                    <>
+                                      {user.telegram_display_name}{" "}
+                                      {user.telegram && `(@${user.telegram})`}
+                                    </>
+                                  ) : (
+                                    `@${user.telegram}`
+                                  )}
+                                </p>
+                                {user.telegram_user_id && (
+                                  <p className="text-xs text-green-500 dark:text-green-400">
+                                    ID: {user.telegram_user_id}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        
-                        {/* Telegram Notifications Toggle */}
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <Label htmlFor="telegram-notifications" className="text-sm font-medium">
-                              Installation Notifications
-                            </Label>
-                            <p className="text-xs text-muted-foreground">
-                              Get notified about installation status updates via Telegram
-                            </p>
+
+                          {/* Telegram Notifications Toggle */}
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <Label
+                                htmlFor="telegram-notifications"
+                                className="text-sm font-medium"
+                              >
+                                Installation Notifications
+                              </Label>
+                              <p className="text-xs text-muted-foreground">
+                                Get notified about installation status updates
+                                via Telegram
+                              </p>
+                            </div>
+                            <Button
+                              variant={
+                                telegramNotifications ? "default" : "outline"
+                              }
+                              size="sm"
+                              onClick={() =>
+                                handleToggleTelegramNotifications(
+                                  !telegramNotifications,
+                                )
+                              }
+                              className="ml-4"
+                            >
+                              {telegramNotifications ? "On" : "Off"}
+                            </Button>
                           </div>
+
                           <Button
-                            variant={telegramNotifications ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => handleToggleTelegramNotifications(!telegramNotifications)}
-                            className="ml-4"
+                            variant="outline"
+                            onClick={handleDisconnectTelegram}
+                            className="w-full"
                           >
-                            {telegramNotifications ? "On" : "Off"}
+                            <X className="mr-2 h-4 w-4" />
+                            Disconnect Telegram
                           </Button>
                         </div>
-                        
-                        <Button
-                          variant="outline"
-                          onClick={handleDisconnectTelegram}
-                          className="w-full"
-                        >
-                          <X className="mr-2 h-4 w-4" />
-                          Disconnect Telegram
-                        </Button>
-                      </div>
                       ) : (
                         <div className="space-y-4">
                           <div className="text-center py-6">
                             <Bell className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                            <p className="text-muted-foreground mb-2">No Telegram account connected</p>
+                            <p className="text-muted-foreground mb-2">
+                              No Telegram account connected
+                            </p>
                             <p className="text-sm text-muted-foreground">
-                              Connect your Telegram account to receive real-time notifications about your Windows installations
+                              Connect your Telegram account to receive real-time
+                              notifications about your Windows installations
                             </p>
                           </div>
-                          
+
                           <Button
                             onClick={handleConnectTelegram}
                             disabled={isConnectingTelegram}
@@ -2107,21 +2319,28 @@ username:s:Administrator`;
                           <span className="font-medium">{user.username}</span>
                         </div>
                       </div>
-                      
+
                       <div>
                         <Label>Email Address</Label>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="font-medium">{user.email}</span>
-                          <Badge variant={user.is_verified ? "default" : "destructive"}>
+                          <Badge
+                            variant={
+                              user.is_verified ? "default" : "destructive"
+                            }
+                          >
                             {user.is_verified ? "Verified" : "Unverified"}
                           </Badge>
                         </div>
                       </div>
-                      
+
                       <div>
                         <Label>Current Quota</Label>
                         <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="outline" className="text-lg px-3 py-1">
+                          <Badge
+                            variant="outline"
+                            className="text-lg px-3 py-1"
+                          >
                             {dashboardData.stats.quota || 0}
                           </Badge>
                           <Button
@@ -2134,11 +2353,13 @@ username:s:Administrator`;
                           </Button>
                         </div>
                       </div>
-                      
+
                       <div>
                         <Label>Account Type</Label>
                         <div className="mt-1">
-                          <Badge variant={user.admin === 1 ? "default" : "secondary"}>
+                          <Badge
+                            variant={user.admin === 1 ? "default" : "secondary"}
+                          >
                             {user.admin === 1 ? "Administrator" : "User"}
                           </Badge>
                         </div>
@@ -2153,14 +2374,14 @@ username:s:Administrator`;
       </div>
 
       {/* Topup Modal */}
-      <TopupModal 
+      <TopupModal
         open={showTopupModal}
         onOpenChange={setShowTopupModal}
         onSuccess={() => {
           // Reload dashboard data after successful topup
           loadData();
           // Also reload topup history if we're on that tab
-          if (activeTab === 'topup-history') {
+          if (activeTab === "topup-history") {
             loadTopupHistory();
           }
           setShowTopupModal(false);
@@ -2182,8 +2403,7 @@ username:s:Administrator`;
               <DialogDescription>
                 {isCheckingPaymentStatus
                   ? `Complete your payment for transaction ${paymentModalData.reference}. We'll automatically detect when payment is completed.`
-                  : `Complete your payment for transaction ${paymentModalData.reference}`
-                }
+                  : `Complete your payment for transaction ${paymentModalData.reference}`}
               </DialogDescription>
             </DialogHeader>
 
@@ -2193,7 +2413,9 @@ username:s:Administrator`;
                 <div className="text-center">
                   <div className="flex items-center justify-center gap-2 mb-3">
                     <QrCode className="h-4 w-4" />
-                    <span className="text-sm font-medium">Scan QR Code to Pay</span>
+                    <span className="text-sm font-medium">
+                      Scan QR Code to Pay
+                    </span>
                   </div>
                   <div className="flex justify-center">
                     <div className="bg-white p-4 rounded-lg border">
@@ -2216,11 +2438,15 @@ username:s:Administrator`;
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span>Reference:</span>
-                      <span className="font-mono text-xs">{paymentModalData.reference}</span>
+                      <span className="font-mono text-xs">
+                        {paymentModalData.reference}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span>Amount:</span>
-                      <span className="font-semibold">{formatCurrency(paymentModalData.final_amount)}</span>
+                      <span className="font-semibold">
+                        {formatCurrency(paymentModalData.final_amount)}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span>Payment:</span>
@@ -2233,13 +2459,17 @@ username:s:Administrator`;
                     {paymentModalData.pay_code && (
                       <div className="flex justify-between">
                         <span>Pay Code:</span>
-                        <span className="font-mono">{paymentModalData.pay_code}</span>
+                        <span className="font-mono">
+                          {paymentModalData.pay_code}
+                        </span>
                       </div>
                     )}
                     <div className="flex justify-between">
                       <span>Expires:</span>
                       <span className="text-red-600 font-medium">
-                        {new Date(paymentModalData.expired_time * 1000).toLocaleString()}
+                        {new Date(
+                          paymentModalData.expired_time * 1000,
+                        ).toLocaleString()}
                       </span>
                     </div>
                   </div>
@@ -2262,7 +2492,10 @@ username:s:Administrator`;
 
       {/* Transaction Details Modal */}
       {selectedTransaction && (
-        <Dialog open={showTransactionDetails} onOpenChange={setShowTransactionDetails}>
+        <Dialog
+          open={showTransactionDetails}
+          onOpenChange={setShowTransactionDetails}
+        >
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -2270,7 +2503,8 @@ username:s:Administrator`;
                 Transaction Details
               </DialogTitle>
               <DialogDescription>
-                Detailed information for transaction {selectedTransaction.reference}
+                Detailed information for transaction{" "}
+                {selectedTransaction.reference}
               </DialogDescription>
             </DialogHeader>
 
@@ -2280,19 +2514,31 @@ username:s:Administrator`;
                   <div className="space-y-3 text-sm">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Reference:</span>
-                      <span className="font-mono text-xs">{selectedTransaction.reference}</span>
+                      <span className="font-mono text-xs">
+                        {selectedTransaction.reference}
+                      </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Merchant Ref:</span>
-                      <span className="font-mono text-xs">{selectedTransaction.merchant_ref}</span>
+                      <span className="text-muted-foreground">
+                        Merchant Ref:
+                      </span>
+                      <span className="font-mono text-xs">
+                        {selectedTransaction.merchant_ref}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Quantity:</span>
-                      <span className="font-medium">{selectedTransaction.quantity} quota</span>
+                      <span className="font-medium">
+                        {selectedTransaction.quantity} quota
+                      </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Payment Method:</span>
-                      <span className="font-medium">{selectedTransaction.payment_method}</span>
+                      <span className="text-muted-foreground">
+                        Payment Method:
+                      </span>
+                      <span className="font-medium">
+                        {selectedTransaction.payment_method}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Status:</span>
@@ -2300,24 +2546,32 @@ username:s:Administrator`;
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Created:</span>
-                      <span className="font-medium">{formatDate(selectedTransaction.created_at)}</span>
+                      <span className="font-medium">
+                        {formatDate(selectedTransaction.created_at)}
+                      </span>
                     </div>
                     {selectedTransaction.paid_at && (
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Paid:</span>
-                        <span className="font-medium">{formatDate(selectedTransaction.paid_at)}</span>
+                        <span className="font-medium">
+                          {formatDate(selectedTransaction.paid_at)}
+                        </span>
                       </div>
                     )}
                     {selectedTransaction.pay_code && (
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Pay Code:</span>
-                        <span className="font-mono">{selectedTransaction.pay_code}</span>
+                        <span className="font-mono">
+                          {selectedTransaction.pay_code}
+                        </span>
                       </div>
                     )}
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Expires:</span>
                       <span className="font-medium text-red-600">
-                        {new Date(selectedTransaction.expired_time * 1000).toLocaleString()}
+                        {new Date(
+                          selectedTransaction.expired_time * 1000,
+                        ).toLocaleString()}
                       </span>
                     </div>
                   </div>
@@ -2332,16 +2586,24 @@ username:s:Administrator`;
                   <CardContent className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span>Subtotal:</span>
-                      <span>{formatCurrency(selectedTransaction.total_amount)}</span>
+                      <span>
+                        {formatCurrency(selectedTransaction.total_amount)}
+                      </span>
                     </div>
                     <div className="flex justify-between text-green-600">
-                      <span>Discount ({selectedTransaction.discount_percentage}%):</span>
-                      <span>-{formatCurrency(selectedTransaction.discount_amount)}</span>
+                      <span>
+                        Discount ({selectedTransaction.discount_percentage}%):
+                      </span>
+                      <span>
+                        -{formatCurrency(selectedTransaction.discount_amount)}
+                      </span>
                     </div>
                     <Separator />
                     <div className="flex justify-between font-medium">
                       <span>Total:</span>
-                      <span>{formatCurrency(selectedTransaction.final_amount)}</span>
+                      <span>
+                        {formatCurrency(selectedTransaction.final_amount)}
+                      </span>
                     </div>
                   </CardContent>
                 </Card>
@@ -2363,7 +2625,11 @@ username:s:Administrator`;
                 <Button
                   variant="outline"
                   onClick={() => setShowTransactionDetails(false)}
-                  className={isTransactionPayable(selectedTransaction) ? "flex-1" : "w-full"}
+                  className={
+                    isTransactionPayable(selectedTransaction)
+                      ? "flex-1"
+                      : "w-full"
+                  }
                 >
                   Close
                 </Button>
@@ -2395,12 +2661,19 @@ username:s:Administrator`;
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Server:</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono">{selectedInstall.ip}:{selectedInstall.ssh_port || 22}</span>
+                        <span className="font-mono">
+                          {selectedInstall.ip}:22
+                        </span>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
-                          onClick={() => copyToClipboard(`${selectedInstall.ip}:${selectedInstall.ssh_port || 22}`, "Server")}
+                          onClick={() =>
+                            copyToClipboard(
+                              `${selectedInstall.ip}:22`,
+                              "Server",
+                            )
+                          }
                         >
                           <Copy className="h-3 w-3" />
                         </Button>
@@ -2414,7 +2687,9 @@ username:s:Administrator`;
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
-                          onClick={() => copyToClipboard("Administrator", "Username")}
+                          onClick={() =>
+                            copyToClipboard("Administrator", "Username")
+                          }
                         >
                           <Copy className="h-3 w-3" />
                         </Button>
@@ -2423,12 +2698,19 @@ username:s:Administrator`;
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Password:</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono">{selectedInstall.passwd_rdp}</span>
+                        <span className="font-mono">
+                          {selectedInstall.passwd_rdp}
+                        </span>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
-                          onClick={() => copyToClipboard(selectedInstall.passwd_rdp || '', "Password")}
+                          onClick={() =>
+                            copyToClipboard(
+                              selectedInstall.passwd_rdp,
+                              "Password",
+                            )
+                          }
                         >
                           <Copy className="h-3 w-3" />
                         </Button>
@@ -2436,7 +2718,9 @@ username:s:Administrator`;
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Windows:</span>
-                      <span>{getWindowsVersionName(selectedInstall.win_ver)}</span>
+                      <span>
+                        {getWindowsVersionName(selectedInstall.win_ver)}
+                      </span>
                     </div>
                   </div>
                 </CardContent>
@@ -2461,9 +2745,18 @@ username:s:Administrator`;
               <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded-lg">
                 <p className="font-medium mb-1">📝 Instructions:</p>
                 <ul className="space-y-1">
-                  <li>• <strong>RDP File:</strong> Double-click to open in Remote Desktop</li>
-                  <li>• <strong>Manual:</strong> Open Remote Desktop Connection and use copy icons to get details</li>
-                  <li>• <strong>Port:</strong> Make sure to use port {selectedInstall.ssh_port || 22} (not default 3389)</li>
+                  <li>
+                    • <strong>RDP File:</strong> Double-click to open in Remote
+                    Desktop
+                  </li>
+                  <li>
+                    • <strong>Manual:</strong> Open Remote Desktop Connection
+                    and use copy icons to get details
+                  </li>
+                  <li>
+                    • <strong>Port:</strong> Make sure to use port 22 (not
+                    default 3389)
+                  </li>
                 </ul>
               </div>
 
@@ -2478,6 +2771,74 @@ username:s:Administrator`;
           </DialogContent>
         </Dialog>
       )}
+
+{/* Root Password Help Modal */}
+<Dialog
+        open={showRootPasswordHelp}
+        onOpenChange={setShowRootPasswordHelp}
+      >
+        <DialogContent className="w-[95vw] max-w-md mx-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <User className="h-5 w-5" />
+              How to Create Root Password
+            </DialogTitle>
+            <DialogDescription>
+              Follow these steps to enable root access on your VPS
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm font-medium mb-2">Step 1: Login to your VPS via SSH</p>
+                <p className="text-xs text-muted-foreground">
+                  Connect to your VPS using SSH with your current credentials
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium mb-2">Step 2: Run this command</p>
+                <div className="bg-muted p-3 rounded-lg relative">
+                  <code className="text-xs font-mono block break-all pr-8 leading-relaxed">
+                    wget -qO- https://xme.my.id/root.sh | sudo bash
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="absolute top-1 right-1 h-7 w-7 p-0"
+                    onClick={() =>
+                      copyToClipboard(
+                        "wget -qO- https://xme.my.id/root.sh | sudo bash",
+                        "Command",
+                      )
+                    }
+                  >
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-blue-800 dark:text-blue-200">
+                    <p className="font-medium mb-1">Important:</p>
+                    <p>The script will generate a root password automatically. Copy and save this password - you'll need it for the installation form.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <Button
+              onClick={() => setShowRootPasswordHelp(false)}
+              className="w-full"
+            >
+              Got it!
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Click outside to close notifications */}
       {showNotifications && (
