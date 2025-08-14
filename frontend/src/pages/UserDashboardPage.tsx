@@ -251,7 +251,7 @@ export default function UserDashboardPage() {
     // Check if there are new installation status notifications
     const hasInstallStatusNotifications = notifications.some(notification =>
       notification.type === 'install_status_update' ||
-      ['completed', 'failed', 'running', 'pending', 'preparing'].includes(notification.status || '')
+      ['manual_review','completed', 'failed', 'running', 'pending', 'preparing'].includes(notification.status || '')
     );
     
     // Check if there are new telegram connection notifications
@@ -1081,6 +1081,7 @@ username:s:Administrator`;
                           <div key={index} className="p-4 border-b last:border-b-0 hover:bg-muted/50">
                             <div className="flex items-start gap-3">
                               <div className="flex-shrink-0 mt-0.5">
+                                {notification.status === 'manual_review' && <AlertCircle className="h-4 w-4 text-orange-500" />}
                                 {notification.status === 'completed' && <CheckCircle className="h-4 w-4 text-green-500" />}
                                 {notification.status === 'failed' && <XCircle className="h-4 w-4 text-red-500" />}
                                 {notification.status === 'running' && <Activity className="h-4 w-4 text-blue-500" />}
