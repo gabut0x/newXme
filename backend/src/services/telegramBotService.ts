@@ -4,7 +4,9 @@ import { logger } from '../utils/logger.js';
 import { DateUtils } from '../utils/dateUtils.js';
 import { BotSecurity } from '../utils/botSecurity.js';
 import { RateLimiter } from '../utils/rateLimiter.js';
-import { ApiService } from './apiService.ts';
+import { UserService } from './userService.js';
+import { InstallService } from './installService.js';
+import { tripayService } from './tripayService.js';
 import crypto from 'crypto';
 
 interface BotStatus {
@@ -72,6 +74,18 @@ interface PerformanceMetrics {
   };
 }
 
+interface ConnectedUser {
+  id: number;
+  username: string;
+  email: string;
+  quota: number;
+  telegram_user_id: number;
+  telegram_display_name: string;
+  telegram_notifications: boolean;
+  is_verified: boolean;
+  is_active: boolean;
+}
+
 export class TelegramBotService {
   private static bot: TelegramBot | null = null;
   private static isRunning = false;
@@ -90,7 +104,7 @@ export class TelegramBotService {
   private static get BOT_TOKEN() {
     return process.env['TELEGRAM_BOT_TOKEN'];
   }
-  private static readonly WEBHOOK_URL = process.env['TELEGRAM_WEBHOOK_URL'];
+
   private static readonly POLLING_INTERVAL = parseInt(process.env['TELEGRAM_POLLING_INTERVAL'] || '2000');
 
   /**
@@ -262,7 +276,7 @@ export class TelegramBotService {
   }
 
   /**
-   * Handle bot commands
+   * Handle bot commands with improved parsing and validation
    */
   private static async handleCommand(msg: TelegramBot.Message): Promise<void> {
     const startTime = Date.now();
@@ -279,11 +293,12 @@ export class TelegramBotService {
       }
 
       // Parse command and arguments
-      const [command, ...args] = text.split(' ');
-      const commandLower = command.toLowerCase();
+      const parts = text.trim().split(/\s+/);
+      const command = parts[0].toLowerCase();
+      const args = parts.slice(1);
 
       // Update command statistics
-      this.commandStats[commandLower] = (this.commandStats[commandLower] || 0) + 1;
+      this.commandStats[command] = (this.commandStats[command] || 0) + 1;
       this.updateDailyStats('commands');
 
       // Security check
@@ -292,41 +307,37 @@ export class TelegramBotService {
         userId,
         username,
         chatId,
-        command: commandLower,
+        command,
         args
       });
 
       if (!securityResult.allowed) {
         await this.sendMessage(chatId, `🚫 ${securityResult.reason}`);
-        await security.logCommand({ userId, username, chatId, command: commandLower, args }, 'failed', securityResult.reason);
+        await security.logCommand({ userId, username, chatId, command, args }, 'failed', securityResult.reason);
         return;
       }
 
       // Handle specific commands
-      console.log(`[CONSOLE DEBUG] Handling command: ${commandLower}`);
-      switch (commandLower) {
+      switch (command) {
         case '/start':
-          console.log(`[CONSOLE DEBUG] Executing /start command`);
           await this.handleStartCommand(chatId, userId, username, args);
           break;
         case '/help':
-          console.log(`[CONSOLE DEBUG] Executing /help command`);
           await this.handleHelpCommand(chatId, userId);
-          break;
-        case '/menu':
-          console.log(`[CONSOLE DEBUG] Executing /menu command`);
-          await this.handleMenuCommand(chatId, userId);
-          break;
-        case '/topup':
-          await this.handleTopupCommand(chatId, userId, args);
           break;
         case '/install':
           await this.handleInstallCommand(chatId, userId, args);
           break;
-        case '/status':
         case '/myquota':
-        case '/balance':
-          await this.handleStatusCommand(chatId, userId);
+        case '/quota':
+          await this.handleQuotaCommand(chatId, userId);
+          break;
+        case '/topup':
+          await this.handleTopupCommand(chatId, userId, args);
+          break;
+        case '/winver':
+        case '/versions':
+          await this.handleWinverCommand(chatId, userId);
           break;
         case '/history':
           await this.handleHistoryCommand(chatId, userId);
@@ -335,18 +346,18 @@ export class TelegramBotService {
           await this.handleCancelCommand(chatId, userId);
           break;
         default:
-          await this.handleUnknownCommand(chatId, commandLower);
+          await this.handleUnknownCommand(chatId, command);
           break;
       }
 
       // Log successful command execution
-      await security.logCommand({ userId, username, chatId, command: commandLower, args }, 'success');
+      await security.logCommand({ userId, username, chatId, command, args }, 'success');
 
       // Record response time
       const responseTime = Date.now() - startTime;
       this.responseTimes.push(responseTime);
       if (this.responseTimes.length > 100) {
-        this.responseTimes = this.responseTimes.slice(-100); // Keep last 100 response times
+        this.responseTimes = this.responseTimes.slice(-100);
       }
 
     } catch (error: any) {
@@ -360,7 +371,7 @@ export class TelegramBotService {
   }
 
   /**
-   * Handle /start command
+   * Handle /start command with connection token support
    */
   private static async handleStartCommand(chatId: number, userId: number, username: string, args: string[]): Promise<void> {
     try {
@@ -373,9 +384,8 @@ export class TelegramBotService {
         }
       }
 
-      // Check if user is already registered
-      const apiService = ApiService.getInstance();
-      const user = await apiService.getUserByTelegramId(userId);
+      // Check if user is already connected
+      const user = await this.getConnectedUser(userId);
       
       if (user) {
         // User is already connected
@@ -383,18 +393,19 @@ export class TelegramBotService {
 
 Akun Telegram Anda sudah terhubung dengan XME Projects.
 
-Gunakan /menu untuk melihat opsi yang tersedia atau /help untuk bantuan.`;
+💰 Quota tersisa: ${user.quota}
+📧 Email: ${user.email}
+✅ Status: ${user.is_verified ? 'Verified' : 'Not Verified'}
 
-        await this.sendMessage(chatId, welcomeMessage, {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '📋 Menu Utama', callback_data: 'main_menu' },
-                { text: '❓ Bantuan', callback_data: 'help' }
-              ]
-            ]
-          }
-        });
+Gunakan perintah berikut:
+• /install <ip> <vps_pass> <win_ver> <rdp_pass> - Install Windows
+• /myquota - Cek quota tersisa
+• /topup <qty> - Topup quota
+• /winver - Lihat versi Windows tersedia
+• /history - Riwayat instalasi
+• /help - Bantuan lengkap`;
+
+        await this.sendMessage(chatId, welcomeMessage);
       } else {
         // User not connected
         const welcomeMessage = `👋 Selamat datang di XME Projects Bot!
@@ -411,18 +422,7 @@ Jika Anda belum memiliki akun, silakan daftar terlebih dahulu di website kami.
 
 🌐 Website: ${process.env['FRONTEND_URL'] || 'https://xmeprojects.com'}`;
 
-        await this.sendMessage(chatId, welcomeMessage, {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '🌐 Buka Website', url: process.env['FRONTEND_URL'] || 'https://xmeprojects.com' }
-              ],
-              [
-                { text: '❓ Bantuan', callback_data: 'help' }
-              ]
-            ]
-          }
-        });
+        await this.sendMessage(chatId, welcomeMessage);
       }
     } catch (error: any) {
       logger.error('Error in start command:', error);
@@ -481,24 +481,17 @@ Jika Anda belum memiliki akun, silakan daftar terlebih dahulu di website kami.
 
 Akun Telegram Anda (@${username}) telah berhasil terhubung dengan akun XME Projects.
 
-Sekarang Anda dapat:
-• 💰 Topup saldo
-• 🖥️ Install Windows
-• 📊 Cek status akun
-• 📋 Lihat riwayat transaksi
+💰 Quota tersisa: ${user.quota}
 
-Gunakan /menu untuk memulai atau /help untuk bantuan.`;
+Sekarang Anda dapat menggunakan perintah berikut:
+• /install <ip> <vps_pass> <win_ver> <rdp_pass> - Install Windows
+• /myquota - Cek quota tersisa  
+• /topup <qty> - Topup quota
+• /winver - Lihat versi Windows tersedia
+• /history - Riwayat instalasi
+• /help - Bantuan lengkap`;
 
-      await this.sendMessage(chatId, successMessage, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '📋 Menu Utama', callback_data: 'main_menu' },
-              { text: '📊 Status Akun', callback_data: 'account_status' }
-            ]
-          ]
-        }
-      });
+      await this.sendMessage(chatId, successMessage);
 
       logger.info('Telegram account connected successfully:', {
         userId: user.id,
@@ -516,95 +509,172 @@ Gunakan /menu untuk memulai atau /help untuk bantuan.`;
   }
 
   /**
-   * Handle /help command
+   * Handle /install command with parameters
+   * Format: /install <ip> <vps_password> <win_version> <rdp_password>
    */
-  private static async handleHelpCommand(chatId: number, userId: number): Promise<void> {
-    const helpMessage = `❓ Bantuan XME Projects Bot
+  private static async handleInstallCommand(chatId: number, userId: number, args: string[]): Promise<void> {
+    try {
+      const user = await this.getConnectedUser(userId);
+      if (!user) {
+        await this.sendNotConnectedMessage(chatId);
+        return;
+      }
 
-📋 Perintah yang tersedia:
-• /start - Mulai menggunakan bot
-• /menu - Tampilkan menu utama
-• /topup - Topup saldo akun
-• /install - Install Windows
-• /status - Cek status akun dan saldo
-• /history - Lihat riwayat transaksi
-• /help - Tampilkan bantuan ini
-• /cancel - Batalkan operasi saat ini
+      if (!user.is_verified) {
+        await this.sendMessage(chatId, '❌ Akun Anda belum terverifikasi. Silakan verifikasi email terlebih dahulu di dashboard web.');
+        return;
+      }
+
+      // Check if user has sufficient quota
+      if (user.quota <= 0) {
+        await this.sendMessage(chatId, `❌ Quota tidak mencukupi!
+
+💰 Quota tersisa: ${user.quota}
+📋 Dibutuhkan: 1 quota untuk install Windows
+
+Gunakan /topup <qty> untuk menambah quota.`);
+        return;
+      }
+
+      // Validate command format
+      if (args.length < 4) {
+        await this.sendMessage(chatId, `❌ Format perintah salah!
+
+📝 Format yang benar:
+/install <ip> <vps_password> <win_version> <rdp_password>
+
+📋 Contoh:
+/install 192.168.1.100 mypassword win11-pro MyRdpPass123
 
 💡 Tips:
-• Pastikan akun Telegram sudah terhubung dengan akun XME Projects
-• Gunakan /menu untuk akses cepat ke semua fitur
-• Gunakan /status untuk cek saldo dan quota
-
-🌐 Website: ${process.env['FRONTEND_URL'] || 'https://xmeprojects.com'}
-📧 Support: xme.noreply@gmail.com`;
-
-    await this.sendMessage(chatId, helpMessage, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '📋 Menu Utama', callback_data: 'main_menu' },
-            { text: '🌐 Website', url: process.env['FRONTEND_URL'] || 'https://xmeprojects.com' }
-          ]
-        ]
+• Gunakan /winver untuk melihat versi Windows yang tersedia
+• Password RDP tidak boleh dimulai dengan karakter #
+• Pastikan VPS Anda online dan dapat diakses`);
+        return;
       }
-    });
-  }
 
-  /**
-   * Handle /menu command
-   */
-  private static async handleMenuCommand(chatId: number, userId: number): Promise<void> {
-    console.log(`[CONSOLE DEBUG] handleMenuCommand called for userId: ${userId}`);
-    logger.info(`[DEBUG] handleMenuCommand called for userId: ${userId}`);
-    const user = await this.getRegisteredUser(userId);
-    console.log(`[CONSOLE DEBUG] getRegisteredUser returned:`, user);
-    logger.info(`[DEBUG] getRegisteredUser returned:`, user);
-    if (!user) {
-      console.log(`[CONSOLE DEBUG] User not found, sending not registered message`);
-      logger.info(`[DEBUG] User not found, sending not registered message`);
-      await this.sendNotRegisteredMessage(chatId);
-      return;
+      const [ip, vpsPassword, winVersion, rdpPassword] = args;
+
+      // Validate parameters
+      const validation = this.validateInstallParameters(ip, vpsPassword, winVersion, rdpPassword);
+      if (!validation.isValid) {
+        await this.sendMessage(chatId, `❌ ${validation.error}`);
+        return;
+      }
+
+      // Show confirmation
+      const confirmMessage = `🖥️ Konfirmasi Install Windows
+
+📋 Detail Instalasi:
+• IP VPS: ${ip}
+• Versi Windows: ${winVersion}
+• Quota akan digunakan: 1
+• Sisa quota setelah install: ${user.quota - 1}
+
+⚠️ Pastikan VPS Anda:
+• Sudah online dan dapat diakses
+• Menggunakan Ubuntu 20/22 atau Debian 12
+• Memiliki akses root dengan password yang benar
+• Memiliki koneksi internet yang stabil
+
+Lanjutkan instalasi?`;
+
+      await this.sendMessage(chatId, confirmMessage, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '✅ Ya, Install Sekarang', callback_data: `confirm_install_${ip}_${vpsPassword}_${winVersion}_${rdpPassword}` }
+            ],
+            [
+              { text: '❌ Batal', callback_data: 'cancel_install' }
+            ]
+          ]
+        }
+      });
+
+    } catch (error: any) {
+      logger.error('Error in install command:', error);
+      await this.sendMessage(chatId, '❌ Terjadi kesalahan saat memproses perintah install.');
     }
-
-    const menuMessage = `📋 Menu Utama - XME Projects
-
-Halo ${user.username}! Pilih opsi di bawah ini:`;
-
-    await this.sendMessage(chatId, menuMessage, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '💰 Topup Saldo', callback_data: 'topup_menu' },
-            { text: '🖥️ Install Windows', callback_data: 'install_menu' }
-          ],
-          [
-            { text: '📊 Status Akun', callback_data: 'account_status' },
-            { text: '📋 Riwayat Transaksi', callback_data: 'transaction_history' }
-          ],
-          [
-            { text: '❓ Bantuan', callback_data: 'help' },
-            { text: '🌐 Dashboard Web', url: process.env['FRONTEND_URL'] || 'https://xmeprojects.com' }
-          ]
-        ]
-      }
-    });
   }
 
   /**
-   * Handle /topup command
+   * Handle /myquota command
+   */
+  private static async handleQuotaCommand(chatId: number, userId: number): Promise<void> {
+    try {
+      const user = await this.getConnectedUser(userId);
+      if (!user) {
+        await this.sendNotConnectedMessage(chatId);
+        return;
+      }
+
+      // Get detailed quota information
+      const db = getDatabase();
+      const [installStats, topupStats] = await Promise.all([
+        db.get(`
+          SELECT 
+            COUNT(*) as total_installs,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_installs,
+            SUM(CASE WHEN status IN ('pending', 'running', 'preparing') THEN 1 ELSE 0 END) as active_installs
+          FROM install_data 
+          WHERE user_id = ?
+        `, [user.id]),
+        db.get(`
+          SELECT 
+            COALESCE(SUM(quantity), 0) as total_topup,
+            COUNT(*) as topup_count
+          FROM topup_transactions 
+          WHERE user_id = ? AND status = 'PAID'
+        `, [user.id])
+      ]);
+
+      const quotaMessage = `💰 Status Quota - ${user.username}
+
+📊 Quota Saat Ini: ${user.quota}
+
+📈 Statistik:
+• Total Install: ${installStats?.total_installs || 0}
+• Install Berhasil: ${installStats?.completed_installs || 0}
+• Install Aktif: ${installStats?.active_installs || 0}
+• Total Topup: ${topupStats?.total_topup || 0} quota
+• Jumlah Topup: ${topupStats?.topup_count || 0} kali
+
+📅 Bergabung: ${new Date(user.created_at).toLocaleDateString('id-ID')}
+
+💡 Gunakan /topup <qty> untuk menambah quota
+📋 Gunakan /install untuk memulai instalasi Windows`;
+
+      await this.sendMessage(chatId, quotaMessage);
+
+    } catch (error: any) {
+      logger.error('Error in quota command:', error);
+      await this.sendMessage(chatId, '❌ Terjadi kesalahan saat mengambil informasi quota.');
+    }
+  }
+
+  /**
+   * Handle /topup command with quantity parameter
+   * Format: /topup <quantity>
    */
   private static async handleTopupCommand(chatId: number, userId: number, args: string[]): Promise<void> {
-    const user = await this.getRegisteredUser(userId);
-    if (!user) {
-      await this.sendNotRegisteredMessage(chatId);
-      return;
-    }
+    try {
+      const user = await this.getConnectedUser(userId);
+      if (!user) {
+        await this.sendNotConnectedMessage(chatId);
+        return;
+      }
 
-    // Show topup options
-    const topupMessage = `💰 Topup Saldo
+      if (args.length === 0) {
+        await this.sendMessage(chatId, `💰 Topup Quota
 
-Pilih nominal topup yang diinginkan:
+📝 Format perintah:
+/topup <quantity>
+
+📋 Contoh:
+/topup 5
+/topup 10
+/topup 25
 
 💡 Diskon otomatis:
 • 5 quota: 12% OFF
@@ -612,144 +682,102 @@ Pilih nominal topup yang diinginkan:
 • 11-19 quota: 25% OFF
 • 20+ quota: 30% OFF
 
-Harga per quota: Rp 5.000`;
-
-    await this.sendMessage(chatId, topupMessage, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '5 Quota (12% OFF)', callback_data: 'topup_5' },
-            { text: '10 Quota (20% OFF)', callback_data: 'topup_10' }
-          ],
-          [
-            { text: '15 Quota (25% OFF)', callback_data: 'topup_15' },
-            { text: '25 Quota (30% OFF)', callback_data: 'topup_25' }
-          ],
-          [
-            { text: '🔢 Custom Amount', callback_data: 'topup_custom' }
-          ],
-          [
-            { text: '🔙 Kembali ke Menu', callback_data: 'main_menu' }
-          ]
-        ]
-      }
-    });
-  }
-
-  /**
-   * Handle /install command
-   */
-  private static async handleInstallCommand(chatId: number, userId: number, args: string[]): Promise<void> {
-    const user = await this.getRegisteredUser(userId);
-    if (!user) {
-      await this.sendNotRegisteredMessage(chatId);
-      return;
-    }
-
-    // Check user quota
-    const quota = await apiService.getUserQuota(userId);
-    if (quota <= 0) {
-      await this.sendMessage(chatId, `❌ Quota tidak mencukupi!
-
-Saldo quota Anda: ${quota}
-Dibutuhkan: 1 quota untuk install Windows
-
-Silakan topup terlebih dahulu menggunakan /topup`, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '💰 Topup Sekarang', callback_data: 'topup_menu' },
-              { text: '📊 Cek Status', callback_data: 'account_status' }
-            ]
-          ]
-        }
-      });
-      return;
-    }
-
-    // Get available Windows versions
-    const versions = await apiService.getWindowsVersions();
-    if (!versions || versions.length === 0) {
-      await this.sendMessage(chatId, '❌ Tidak ada versi Windows yang tersedia saat ini.');
-      return;
-    }
-
-    const installMessage = `🖥️ Install Windows
-
-Quota tersedia: ${quota}
-Pilih versi Windows yang ingin diinstall:`;
-
-    // Create inline keyboard for Windows versions
-    const keyboard = [];
-    for (let i = 0; i < versions.length; i += 2) {
-      const row = [];
-      row.push({ text: versions[i].name, callback_data: `install_${versions[i].slug}` });
-      if (versions[i + 1]) {
-        row.push({ text: versions[i + 1].name, callback_data: `install_${versions[i + 1].slug}` });
-      }
-      keyboard.push(row);
-    }
-    keyboard.push([{ text: '🔙 Kembali ke Menu', callback_data: 'main_menu' }]);
-
-    await this.sendMessage(chatId, installMessage, {
-      reply_markup: { inline_keyboard: keyboard }
-    });
-  }
-
-  /**
-   * Handle /status command
-   */
-  private static async handleStatusCommand(chatId: number, userId: number): Promise<void> {
-    const user = await this.getRegisteredUser(userId);
-    if (!user) {
-      await this.sendNotRegisteredMessage(chatId);
-      return;
-    }
-
-    try {
-      // Get user quota info
-      const quotaInfo = await apiService.getUserQuotaInfo(userId);
-      const installations = await apiService.getUserInstallations(userId);
-
-      if (!quotaInfo.success) {
-        await this.sendMessage(chatId, '❌ Gagal mengambil informasi akun. Silakan coba lagi.');
+💵 Harga per quota: Rp 5.000`);
         return;
       }
 
-      const data = quotaInfo.data;
-      const activeInstalls = installations.filter(install => ['pending', 'running'].includes(install.status));
+      const quantity = parseInt(args[0]);
+      if (isNaN(quantity) || quantity <= 0) {
+        await this.sendMessage(chatId, '❌ Quantity harus berupa angka positif. Contoh: /topup 5');
+        return;
+      }
 
-      const statusMessage = `📊 Status Akun - ${user.username}
+      if (quantity > 1000) {
+        await this.sendMessage(chatId, '❌ Maksimal topup 1000 quota per transaksi.');
+        return;
+      }
 
-💰 Saldo Quota: ${data.current_quota}
-🖥️ Total Install: ${data.install_count}
-✅ Install Berhasil: ${data.completed_installs}
-🔄 Install Aktif: ${activeInstalls.length}
+      // Calculate pricing
+      const calculation = await this.calculateTopupPrice(quantity);
+      
+      // Get available payment methods
+      const paymentMethods = await this.getAvailablePaymentMethods();
+      if (paymentMethods.length === 0) {
+        await this.sendMessage(chatId, '❌ Tidak ada metode pembayaran yang tersedia saat ini.');
+        return;
+      }
 
-📈 Statistik:
-• Total Topup: ${data.total_topup} quota
-• Jumlah Topup: ${data.topup_count} kali
-• Quota Terpakai: ${data.used_quota}
+      const topupMessage = `💰 Topup ${quantity} Quota
 
-📅 Bergabung: ${new Date(user.created_at).toLocaleDateString('id-ID')}`;
+💵 Detail Harga:
+• Harga per quota: ${this.formatCurrency(calculation.unitPrice)}
+• Subtotal: ${this.formatCurrency(calculation.totalAmount)}
+${calculation.discountAmount > 0 ? `• Diskon (${calculation.discountPercentage}%): -${this.formatCurrency(calculation.discountAmount)}` : ''}
+• Total Bayar: ${this.formatCurrency(calculation.finalAmount)}
 
-      await this.sendMessage(chatId, statusMessage, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '💰 Topup', callback_data: 'topup_menu' },
-              { text: '🖥️ Install', callback_data: 'install_menu' }
-            ],
-            [
-              { text: '📋 Riwayat', callback_data: 'transaction_history' },
-              { text: '📋 Menu Utama', callback_data: 'main_menu' }
-            ]
-          ]
+Pilih metode pembayaran:`;
+
+      // Create payment method buttons (max 2 per row)
+      const keyboard = [];
+      for (let i = 0; i < paymentMethods.length; i += 2) {
+        const row = [];
+        row.push({ text: paymentMethods[i].name, callback_data: `topup_${quantity}_${paymentMethods[i].code}` });
+        if (paymentMethods[i + 1]) {
+          row.push({ text: paymentMethods[i + 1].name, callback_data: `topup_${quantity}_${paymentMethods[i + 1].code}` });
         }
+        keyboard.push(row);
+      }
+      keyboard.push([{ text: '❌ Batal', callback_data: 'cancel_topup' }]);
+
+      await this.sendMessage(chatId, topupMessage, {
+        reply_markup: { inline_keyboard: keyboard }
       });
+
     } catch (error: any) {
-      logger.error('Error in status command:', error);
-      await this.sendMessage(chatId, '❌ Terjadi kesalahan saat mengambil status akun.');
+      logger.error('Error in topup command:', error);
+      await this.sendMessage(chatId, '❌ Terjadi kesalahan saat memproses topup.');
+    }
+  }
+
+  /**
+   * Handle /winver command
+   */
+  private static async handleWinverCommand(chatId: number, userId: number): Promise<void> {
+    try {
+      const user = await this.getConnectedUser(userId);
+      if (!user) {
+        await this.sendNotConnectedMessage(chatId);
+        return;
+      }
+
+      // Get available Windows versions
+      const db = getDatabase();
+      const versions = await db.all('SELECT * FROM windows_versions ORDER BY name');
+
+      if (versions.length === 0) {
+        await this.sendMessage(chatId, '❌ Tidak ada versi Windows yang tersedia saat ini.');
+        return;
+      }
+
+      let versionMessage = `🖥️ Versi Windows Tersedia
+
+📋 Daftar versi yang dapat diinstall:\n`;
+
+      versions.forEach((version, index) => {
+        versionMessage += `${index + 1}. ${version.name} (${version.slug})\n`;
+      });
+
+      versionMessage += `\n💡 Gunakan slug dalam perintah install:
+/install <ip> <vps_pass> <slug> <rdp_pass>
+
+📋 Contoh:
+/install 192.168.1.100 mypass win11-pro MyRdpPass123`;
+
+      await this.sendMessage(chatId, versionMessage);
+
+    } catch (error: any) {
+      logger.error('Error in winver command:', error);
+      await this.sendMessage(chatId, '❌ Terjadi kesalahan saat mengambil daftar versi Windows.');
     }
   }
 
@@ -757,74 +785,99 @@ Pilih versi Windows yang ingin diinstall:`;
    * Handle /history command
    */
   private static async handleHistoryCommand(chatId: number, userId: number): Promise<void> {
-    const user = await this.getRegisteredUser(userId);
-    if (!user) {
-      await this.sendNotRegisteredMessage(chatId);
-      return;
-    }
-
     try {
-      // Get recent installations and topup history
-      const installations = await apiService.getUserInstallations(userId);
-      const topupHistory = await apiService.getTopupHistory(userId, 5);
-
-      let historyMessage = `📋 Riwayat Transaksi - ${user.username}\n\n`;
-
-      // Recent installations
-      if (installations.length > 0) {
-        historyMessage += `🖥️ Install Terakhir:\n`;
-        installations.slice(0, 3).forEach((install, index) => {
-          const status = this.getStatusEmoji(install.status);
-          const date = new Date(install.created_at).toLocaleDateString('id-ID');
-          historyMessage += `${index + 1}. ${install.win_ver} - ${install.ip}\n   ${status} ${install.status} (${date})\n`;
-        });
-        historyMessage += '\n';
+      const user = await this.getConnectedUser(userId);
+      if (!user) {
+        await this.sendNotConnectedMessage(chatId);
+        return;
       }
 
-      // Recent topups
-      if (topupHistory.length > 0) {
-        historyMessage += `💰 Topup Terakhir:\n`;
-        topupHistory.slice(0, 3).forEach((topup, index) => {
-          const status = topup.status === 'PAID' ? '✅' : topup.status === 'UNPAID' ? '⏳' : '❌';
-          const date = new Date(topup.created_at).toLocaleDateString('id-ID');
-          const amount = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(topup.final_amount);
-          historyMessage += `${index + 1}. ${topup.quantity} quota - ${amount}\n   ${status} ${topup.status} (${date})\n`;
-        });
-      } else {
-        historyMessage += `💰 Belum ada riwayat topup\n`;
+      // Get recent installations
+      const db = getDatabase();
+      const installations = await db.all(
+        'SELECT * FROM install_data WHERE user_id = ? ORDER BY created_at DESC LIMIT 10',
+        [user.id]
+      );
+
+      if (installations.length === 0) {
+        await this.sendMessage(chatId, `📋 Riwayat Instalasi - ${user.username}
+
+❌ Belum ada riwayat instalasi.
+
+💡 Gunakan /install untuk memulai instalasi Windows pertama Anda.`);
+        return;
       }
 
-      await this.sendMessage(chatId, historyMessage, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '🌐 Lihat Detail di Web', url: `${process.env['FRONTEND_URL'] || 'https://xmeprojects.com'}/dashboard` }
-            ],
-            [
-              { text: '🔙 Kembali ke Menu', callback_data: 'main_menu' }
-            ]
-          ]
-        }
+      let historyMessage = `📋 Riwayat Instalasi - ${user.username}\n\n`;
+
+      installations.forEach((install, index) => {
+        const status = this.getStatusEmoji(install.status);
+        const date = new Date(install.created_at).toLocaleDateString('id-ID');
+        const time = new Date(install.created_at).toLocaleTimeString('id-ID', { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        });
+        
+        historyMessage += `${index + 1}. ${install.ip} - ${install.win_ver}\n`;
+        historyMessage += `   ${status} ${install.status.toUpperCase()}\n`;
+        historyMessage += `   📅 ${date} ${time}\n\n`;
       });
+
+      historyMessage += `💡 Gunakan /install untuk instalasi baru`;
+
+      await this.sendMessage(chatId, historyMessage);
+
     } catch (error: any) {
       logger.error('Error in history command:', error);
-      await this.sendMessage(chatId, '❌ Terjadi kesalahan saat mengambil riwayat transaksi.');
+      await this.sendMessage(chatId, '❌ Terjadi kesalahan saat mengambil riwayat instalasi.');
     }
+  }
+
+  /**
+   * Handle /help command
+   */
+  private static async handleHelpCommand(chatId: number, userId: number): Promise<void> {
+    const helpMessage = `❓ Bantuan XME Projects Bot
+
+📋 Perintah yang tersedia:
+
+🔗 Koneksi:
+• /start - Mulai menggunakan bot atau hubungkan akun
+
+🖥️ Instalasi:
+• /install <ip> <vps_pass> <win_ver> <rdp_pass> - Install Windows
+• /winver - Lihat versi Windows tersedia
+• /history - Riwayat instalasi
+
+💰 Quota & Topup:
+• /myquota - Cek quota tersisa
+• /topup <qty> - Topup quota
+
+🛠️ Lainnya:
+• /help - Bantuan ini
+• /cancel - Batalkan operasi
+
+📋 Contoh Penggunaan:
+/install 192.168.1.100 mypassword win11-pro MyRdpPass123
+/topup 10
+/myquota
+
+💡 Tips:
+• Pastikan VPS online sebelum install
+• Password RDP tidak boleh dimulai dengan #
+• Gunakan /winver untuk melihat slug versi Windows
+
+🌐 Website: ${process.env['FRONTEND_URL'] || 'https://xmeprojects.com'}
+📧 Support: xme.noreply@gmail.com`;
+
+    await this.sendMessage(chatId, helpMessage);
   }
 
   /**
    * Handle /cancel command
    */
   private static async handleCancelCommand(chatId: number, userId: number): Promise<void> {
-    await this.sendMessage(chatId, '✅ Operasi dibatalkan. Kembali ke menu utama.', {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '📋 Menu Utama', callback_data: 'main_menu' }
-          ]
-        ]
-      }
-    });
+    await this.sendMessage(chatId, '✅ Operasi dibatalkan.');
   }
 
   /**
@@ -833,16 +886,7 @@ Pilih versi Windows yang ingin diinstall:`;
   private static async handleUnknownCommand(chatId: number, command: string): Promise<void> {
     await this.sendMessage(chatId, `❓ Perintah "${command}" tidak dikenali.
 
-Gunakan /help untuk melihat daftar perintah yang tersedia.`, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '❓ Bantuan', callback_data: 'help' },
-            { text: '📋 Menu Utama', callback_data: 'main_menu' }
-          ]
-        ]
-      }
-    });
+Gunakan /help untuk melihat daftar perintah yang tersedia.`);
   }
 
   /**
@@ -854,29 +898,22 @@ Gunakan /help untuk melihat daftar perintah yang tersedia.`, {
 
     if (!userId) return;
 
-    const user = await this.getRegisteredUser(userId);
+    const user = await this.getConnectedUser(userId);
     if (!user) {
-      await this.sendNotRegisteredMessage(chatId);
+      await this.sendNotConnectedMessage(chatId);
       return;
     }
 
-    // Respond to non-command messages
     await this.sendMessage(chatId, `👋 Halo ${user.username}!
 
 Saya tidak mengerti pesan tersebut. Gunakan perintah berikut:
 
-• /menu - Menu utama
-• /help - Bantuan
-• /status - Status akun`, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '📋 Menu Utama', callback_data: 'main_menu' },
-            { text: '❓ Bantuan', callback_data: 'help' }
-          ]
-        ]
-      }
-    });
+• /help - Bantuan lengkap
+• /install - Install Windows
+• /myquota - Cek quota
+• /topup - Topup quota
+• /winver - Versi Windows
+• /history - Riwayat instalasi`);
   }
 
   /**
@@ -894,35 +931,14 @@ Saya tidak mengerti pesan tersebut. Gunakan perintah berikut:
       await this.bot?.answerCallbackQuery(query.id);
 
       // Handle different callback data
-      switch (data) {
-        case 'main_menu':
-          await this.handleMenuCommand(chatId, userId);
-          break;
-        case 'help':
-          await this.handleHelpCommand(chatId, userId);
-          break;
-        case 'account_status':
-          await this.handleStatusCommand(chatId, userId);
-          break;
-        case 'topup_menu':
-          await this.handleTopupCommand(chatId, userId, []);
-          break;
-        case 'install_menu':
-          await this.handleInstallCommand(chatId, userId, []);
-          break;
-        case 'transaction_history':
-          await this.handleHistoryCommand(chatId, userId);
-          break;
-        default:
-          // Handle specific callbacks
-          if (data.startsWith('topup_')) {
-            await this.handleTopupCallback(chatId, userId, data);
-          } else if (data.startsWith('install_')) {
-            await this.handleInstallCallback(chatId, userId, data);
-          } else {
-            await this.sendMessage(chatId, '❓ Opsi tidak dikenali.');
-          }
-          break;
+      if (data.startsWith('confirm_install_')) {
+        await this.handleInstallConfirmation(chatId, userId, data);
+      } else if (data.startsWith('topup_')) {
+        await this.handleTopupCallback(chatId, userId, data);
+      } else if (data === 'cancel_install' || data === 'cancel_topup') {
+        await this.sendMessage(chatId, '✅ Operasi dibatalkan.');
+      } else {
+        await this.sendMessage(chatId, '❓ Opsi tidak dikenali.');
       }
     } catch (error: any) {
       logger.error('Error handling callback query:', error);
@@ -933,58 +949,122 @@ Saya tidak mengerti pesan tersebut. Gunakan perintah berikut:
   }
 
   /**
+   * Handle install confirmation callback
+   */
+  private static async handleInstallConfirmation(chatId: number, userId: number, data: string): Promise<void> {
+    try {
+      // Parse install parameters from callback data
+      const parts = data.replace('confirm_install_', '').split('_');
+      if (parts.length < 4) {
+        await this.sendMessage(chatId, '❌ Data instalasi tidak valid.');
+        return;
+      }
+
+      const [ip, vpsPassword, winVersion, rdpPassword] = parts;
+
+      const user = await this.getConnectedUser(userId);
+      if (!user) {
+        await this.sendNotConnectedMessage(chatId);
+        return;
+      }
+
+      // Double-check quota
+      if (user.quota <= 0) {
+        await this.sendMessage(chatId, '❌ Quota tidak mencukupi untuk instalasi.');
+        return;
+      }
+
+      await this.sendMessage(chatId, '🔄 Memulai instalasi Windows...\n\nProses ini akan memakan waktu beberapa menit. Anda akan mendapat notifikasi ketika instalasi selesai.');
+
+      // Process installation using InstallService
+      const result = await InstallService.processInstallation(
+        user.id,
+        ip,
+        vpsPassword,
+        winVersion,
+        rdpPassword
+      );
+
+      if (result.success) {
+        await this.sendMessage(chatId, `✅ ${result.message}
+
+📋 Detail:
+• IP: ${ip}
+• Windows: ${winVersion}
+• Install ID: ${result.installId}
+
+⏰ Estimasi waktu: 5-15 menit
+🔔 Anda akan mendapat notifikasi otomatis ketika instalasi selesai.`);
+      } else {
+        await this.sendMessage(chatId, `❌ Instalasi gagal: ${result.message}`);
+      }
+
+    } catch (error: any) {
+      logger.error('Error in install confirmation:', error);
+      await this.sendMessage(chatId, '❌ Terjadi kesalahan saat memproses instalasi.');
+    }
+  }
+
+  /**
    * Handle topup callback
    */
   private static async handleTopupCallback(chatId: number, userId: number, data: string): Promise<void> {
-    const user = await this.getRegisteredUser(userId);
-    if (!user) {
-      await this.sendNotRegisteredMessage(chatId);
-      return;
-    }
-
     try {
-      // Extract quantity from callback data
-      const quantityMatch = data.match(/topup_(\d+)/);
-      if (!quantityMatch) {
-        await this.sendMessage(chatId, '❌ Format topup tidak valid.');
+      // Parse topup data: topup_quantity_paymentmethod
+      const parts = data.split('_');
+      if (parts.length < 3) {
+        await this.sendMessage(chatId, '❌ Data topup tidak valid.');
         return;
       }
 
-      const quantity = parseInt(quantityMatch[1]);
+      const quantity = parseInt(parts[1]);
+      const paymentMethod = parts[2];
 
-      // Get payment methods
-      const paymentMethods = await apiService.getEnabledPaymentMethods();
-      if (!paymentMethods || paymentMethods.length === 0) {
-        await this.sendMessage(chatId, '❌ Tidak ada metode pembayaran yang tersedia saat ini.');
+      const user = await this.getConnectedUser(userId);
+      if (!user) {
+        await this.sendNotConnectedMessage(chatId);
         return;
       }
 
-      // Calculate price
-      const calculation = await apiService.calculateTopupAmount(quantity);
-      const finalAmount = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(calculation.total);
+      await this.sendMessage(chatId, '🔄 Membuat transaksi topup...');
 
-      const paymentMessage = `💰 Topup ${quantity} Quota
+      // Create topup transaction using internal API
+      const result = await this.createTopupTransaction(user.id, quantity, paymentMethod);
 
-💵 Total: ${finalAmount}
-${calculation.fee > 0 ? `💳 Diskon: ${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(calculation.fee)}` : ''}
+      if (result.success && result.data) {
+        const transaction = result.data;
+        
+        let paymentMessage = `✅ Transaksi topup berhasil dibuat!
 
-Pilih metode pembayaran:`;
+📋 Detail Transaksi:
+• Quantity: ${transaction.quantity} quota
+• Total: ${this.formatCurrency(transaction.final_amount)}
+• Metode: ${transaction.payment_name}
+• Reference: ${transaction.reference}
 
-      // Create payment method buttons (limit to 3 per row)
-      const keyboard = [];
-      for (let i = 0; i < paymentMethods.length; i += 2) {
-        const row = [];
-        row.push({ text: paymentMethods[i].name, callback_data: `pay_${quantity}_${paymentMethods[i].code}` });
-        if (paymentMethods[i + 1]) {
-          row.push({ text: paymentMethods[i + 1].name, callback_data: `pay_${quantity}_${paymentMethods[i + 1].code}` });
+💳 Untuk menyelesaikan pembayaran:
+1. Klik link pembayaran di bawah
+2. Ikuti instruksi pembayaran
+3. Quota akan otomatis ditambahkan setelah pembayaran berhasil
+
+⏰ Link berlaku sampai: ${new Date(transaction.expired_time * 1000).toLocaleString('id-ID')}`;
+
+        const keyboard = [
+          [{ text: '💳 Bayar Sekarang', url: transaction.checkout_url }]
+        ];
+
+        // Add QR code option if available
+        if (transaction.qr_url) {
+          keyboard.unshift([{ text: '📱 Lihat QR Code', url: transaction.qr_url }]);
         }
-        keyboard.push(row);
-      }
-      keyboard.push([{ text: '🔙 Kembali', callback_data: 'topup_menu' }]);
 
-      await this.sendMessage(chatId, paymentMessage, {
-        reply_markup: { inline_keyboard: keyboard }
-      });
+        await this.sendMessage(chatId, paymentMessage, {
+          reply_markup: { inline_keyboard: keyboard }
+        });
+      } else {
+        await this.sendMessage(chatId, `❌ Gagal membuat transaksi: ${result.message}`);
+      }
+
     } catch (error: any) {
       logger.error('Error in topup callback:', error);
       await this.sendMessage(chatId, '❌ Terjadi kesalahan saat memproses topup.');
@@ -992,88 +1072,29 @@ Pilih metode pembayaran:`;
   }
 
   /**
-   * Handle install callback
+   * Get connected user by Telegram ID
    */
-  private static async handleInstallCallback(chatId: number, userId: number, data: string): Promise<void> {
-    const user = await this.getRegisteredUser(userId);
-    if (!user) {
-      await this.sendNotRegisteredMessage(chatId);
-      return;
-    }
-
+  private static async getConnectedUser(telegramUserId: number): Promise<ConnectedUser | null> {
     try {
-      // Extract Windows version from callback data
-      const versionMatch = data.match(/install_(.+)/);
-      if (!versionMatch) {
-        await this.sendMessage(chatId, '❌ Format install tidak valid.');
-        return;
-      }
+      const db = getDatabase();
+      const user = await db.get(`
+        SELECT u.id, u.username, u.email, u.quota, u.telegram_user_id, u.telegram_display_name, 
+               u.telegram_notifications, u.is_verified, u.is_active, u.created_at
+        FROM users u 
+        WHERE u.telegram_user_id = ? AND u.is_active = 1
+      `, [telegramUserId]);
 
-      const winVersion = versionMatch[1];
-
-      // Check quota again
-      const quota = await apiService.getUserQuota(userId);
-      if (quota <= 0) {
-        await this.sendMessage(chatId, '❌ Quota tidak mencukupi untuk install Windows.');
-        return;
-      }
-
-      const confirmMessage = `🖥️ Konfirmasi Install Windows
-
-Versi: ${winVersion}
-Quota akan digunakan: 1
-Sisa quota setelah install: ${quota - 1}
-
-⚠️ Pastikan VPS Anda:
-• Sudah online dan dapat diakses
-• Menggunakan Ubuntu 20/22 atau Debian 12
-• Memiliki akses root
-• Memiliki koneksi internet yang stabil
-
-Lanjutkan install?`;
-
-      await this.sendMessage(chatId, confirmMessage, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '✅ Ya, Install Sekarang', callback_data: `confirm_install_${winVersion}` }
-            ],
-            [
-              { text: '❌ Batal', callback_data: 'install_menu' }
-            ]
-          ]
-        }
-      });
+      return user || null;
     } catch (error: any) {
-      logger.error('Error in install callback:', error);
-      await this.sendMessage(chatId, '❌ Terjadi kesalahan saat memproses install.');
-    }
-  }
-
-  /**
-   * Get registered user by Telegram ID
-   */
-  private static async getRegisteredUser(telegramUserId: number): Promise<any> {
-    try {
-      console.log(`[CONSOLE DEBUG] Getting user for telegram ID: ${telegramUserId}`);
-      logger.info(`[DEBUG] Getting user for telegram ID: ${telegramUserId}`);
-      const apiService = ApiService.getInstance();
-      const user = await apiService.getUserByTelegramId(telegramUserId);
-      console.log(`[CONSOLE DEBUG] User found:`, user);
-      logger.info(`[DEBUG] User found:`, user);
-      return user;
-    } catch (error: any) {
-      console.log(`[CONSOLE DEBUG] Error getting user:`, error);
-      logger.error(`[DEBUG] Error getting user:`, error);
-      logger.error('Error getting registered user:', error);
+      logger.error('Error getting connected user:', error);
       return null;
     }
   }
 
   /**
-   * Send not registered message
+   * Send not connected message
    */
-  private static async sendNotRegisteredMessage(chatId: number): Promise<void> {
+  private static async sendNotConnectedMessage(chatId: number): Promise<void> {
     const message = `🔐 Akun Belum Terhubung
 
 Untuk menggunakan bot ini, Anda perlu menghubungkan akun Telegram dengan akun XME Projects.
@@ -1084,20 +1105,227 @@ Untuk menggunakan bot ini, Anda perlu menghubungkan akun Telegram dengan akun XM
 3. Klik "Connect Telegram"
 4. Ikuti instruksi yang diberikan
 
-Jika belum punya akun, daftar dulu di website kami.`;
+Jika belum punya akun, daftar dulu di website kami.
 
-    await this.sendMessage(chatId, message, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '🌐 Buka Website', url: process.env['FRONTEND_URL'] || 'https://xmeprojects.com' }
-          ],
-          [
-            { text: '❓ Bantuan', callback_data: 'help' }
-          ]
-        ]
+🌐 Website: ${process.env['FRONTEND_URL'] || 'https://xmeprojects.com'}`;
+
+    await this.sendMessage(chatId, message);
+  }
+
+  /**
+   * Validate install parameters
+   */
+  private static validateInstallParameters(ip: string, vpsPassword: string, winVersion: string, rdpPassword: string): { isValid: boolean; error?: string } {
+    // Validate IP format
+    const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+    if (!ipRegex.test(ip)) {
+      return { isValid: false, error: 'Format IP tidak valid. Contoh: 192.168.1.100' };
+    }
+
+    // Validate VPS password
+    if (!vpsPassword || vpsPassword.length < 1) {
+      return { isValid: false, error: 'Password VPS tidak boleh kosong.' };
+    }
+
+    // Validate Windows version format
+    if (!winVersion || !/^[a-z0-9-_]+$/.test(winVersion)) {
+      return { isValid: false, error: 'Format versi Windows tidak valid. Gunakan /winver untuk melihat versi yang tersedia.' };
+    }
+
+    // Validate RDP password
+    if (!rdpPassword || rdpPassword.length <= 3) {
+      return { isValid: false, error: 'Password RDP harus lebih dari 3 karakter.' };
+    }
+
+    if (rdpPassword.startsWith('#')) {
+      return { isValid: false, error: 'Password RDP tidak boleh dimulai dengan karakter "#".' };
+    }
+
+    return { isValid: true };
+  }
+
+  /**
+   * Calculate topup price with discounts
+   */
+  private static async calculateTopupPrice(quantity: number): Promise<{
+    unitPrice: number;
+    totalAmount: number;
+    discountPercentage: number;
+    discountAmount: number;
+    finalAmount: number;
+  }> {
+    const unitPrice = 5000; // Base price per quota
+    const totalAmount = quantity * unitPrice;
+    
+    let discountPercentage = 0;
+    if (quantity >= 5 && quantity < 6) {
+      discountPercentage = 12;
+    } else if (quantity >= 6 && quantity <= 10) {
+      discountPercentage = 20;
+    } else if (quantity >= 11 && quantity <= 19) {
+      discountPercentage = 25;
+    } else if (quantity >= 20) {
+      discountPercentage = 30;
+    }
+
+    const discountAmount = Math.floor(totalAmount * (discountPercentage / 100));
+    const finalAmount = totalAmount - discountAmount;
+
+    return {
+      unitPrice,
+      totalAmount,
+      discountPercentage,
+      discountAmount,
+      finalAmount
+    };
+  }
+
+  /**
+   * Get available payment methods
+   */
+  private static async getAvailablePaymentMethods(): Promise<any[]> {
+    try {
+      const db = getDatabase();
+      const methods = await db.all(
+        'SELECT code, name, type FROM payment_methods WHERE is_enabled = 1 ORDER BY name LIMIT 10'
+      );
+      
+      // If no methods in database, try to get from Tripay
+      if (methods.length === 0) {
+        const tripayMethods = await tripayService.getPaymentChannels();
+        return tripayMethods.slice(0, 10); // Limit to 10 methods
       }
-    });
+      
+      return methods;
+    } catch (error: any) {
+      logger.error('Error getting payment methods:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Create topup transaction using internal services
+   */
+  private static async createTopupTransaction(userId: number, quantity: number, paymentMethod: string): Promise<{
+    success: boolean;
+    message: string;
+    data?: any;
+  }> {
+    try {
+      const db = getDatabase();
+
+      // Get user data
+      const user = await db.get('SELECT username, email FROM users WHERE id = ?', [userId]);
+      if (!user) {
+        return { success: false, message: 'User tidak ditemukan' };
+      }
+
+      // Calculate pricing
+      const calculation = await this.calculateTopupPrice(quantity);
+
+      // Generate merchant reference
+      const merchantRef = tripayService.generateMerchantRef(userId, quantity);
+      
+      // Create transaction record
+      const result = await db.run(`
+        INSERT INTO topup_transactions (
+          user_id, merchant_ref, amount, quantity, total_amount, 
+          discount_percentage, discount_amount, final_amount, 
+          payment_method, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        userId,
+        merchantRef,
+        calculation.unitPrice,
+        quantity,
+        calculation.totalAmount,
+        calculation.discountPercentage,
+        calculation.discountAmount,
+        calculation.finalAmount,
+        paymentMethod,
+        'PENDING',
+        DateUtils.nowSQLite(),
+        DateUtils.nowSQLite()
+      ]);
+
+      // Create Tripay transaction
+      const expiry = Math.floor(Date.now() / 1000) + (24 * 60 * 60); // 24 hours
+
+      const tripayRequest = {
+        method: paymentMethod,
+        merchant_ref: merchantRef,
+        amount: Math.round(calculation.finalAmount),
+        customer_name: user.username,
+        customer_email: user.email,
+        customer_phone: '',
+        order_items: [{
+          sku: 'QUOTA-INSTALL',
+          name: 'Quota Install',
+          price: Math.round(calculation.finalAmount),
+          quantity: 1,
+          product_url: process.env['FRONTEND_URL'] || 'https://localhost:3000',
+          image_url: 'https://localhost/quota-install.jpg'
+        }],
+        return_url: `${process.env['FRONTEND_URL'] || 'https://localhost:3000'}/dashboard?payment=success`,
+        expired_time: expiry
+      };
+
+      const tripayResponse = await tripayService.createTransaction(tripayRequest);
+
+      // Update transaction with Tripay response
+      await db.run(`
+        UPDATE topup_transactions 
+        SET reference = ?, payment_url = ?, checkout_url = ?, pay_code = ?, 
+            status = ?, expired_time = ?, updated_at = ?
+        WHERE id = ?
+      `, [
+        tripayResponse.data.reference,
+        tripayResponse.data.pay_url,
+        tripayResponse.data.checkout_url,
+        tripayResponse.data.pay_code,
+        tripayResponse.data.status,
+        tripayResponse.data.expired_time,
+        DateUtils.nowSQLite(),
+        result.lastID
+      ]);
+
+      logger.info('Topup transaction created via Telegram bot:', {
+        userId,
+        transactionId: result.lastID,
+        reference: tripayResponse.data.reference,
+        amount: calculation.finalAmount,
+        quantity
+      });
+
+      return {
+        success: true,
+        message: 'Transaksi berhasil dibuat',
+        data: {
+          transaction_id: result.lastID,
+          reference: tripayResponse.data.reference,
+          merchant_ref: merchantRef,
+          quantity,
+          total_amount: calculation.totalAmount,
+          discount_percentage: calculation.discountPercentage,
+          discount_amount: calculation.discountAmount,
+          final_amount: calculation.finalAmount,
+          checkout_url: tripayResponse.data.checkout_url,
+          qr_url: tripayResponse.data.qr_url,
+          pay_code: tripayResponse.data.pay_code,
+          payment_method: tripayResponse.data.payment_method,
+          payment_name: tripayResponse.data.payment_name,
+          status: tripayResponse.data.status,
+          expired_time: tripayResponse.data.expired_time
+        }
+      };
+
+    } catch (error: any) {
+      logger.error('Error creating topup transaction:', error);
+      return {
+        success: false,
+        message: error.message || 'Gagal membuat transaksi topup'
+      };
+    }
   }
 
   /**
@@ -1109,17 +1337,112 @@ Jika belum punya akun, daftar dulu di website kami.`;
         throw new Error('Bot not initialized');
       }
 
-      await this.bot.sendMessage(chatId, text, {
-        parse_mode: 'HTML',
-        disable_web_page_preview: true,
-        ...options
-      });
+      // Split long messages if needed
+      const maxLength = 4096;
+      if (text.length > maxLength) {
+        const chunks = this.splitMessage(text, maxLength);
+        for (let i = 0; i < chunks.length; i++) {
+          await this.bot.sendMessage(chatId, chunks[i], {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
+            ...(i === chunks.length - 1 ? options : {}) // Only add options to last message
+          });
+          
+          // Small delay between messages
+          if (i < chunks.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
+      } else {
+        await this.bot.sendMessage(chatId, text, {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          ...options
+        });
+      }
 
       this.updateActivity();
     } catch (error: any) {
       logger.error('Error sending message:', error);
       this.errorCount++;
       this.lastError = error.message;
+    }
+  }
+
+  /**
+   * Split long messages into chunks
+   */
+  private static splitMessage(text: string, maxLength: number): string[] {
+    const chunks: string[] = [];
+    let currentChunk = '';
+    const lines = text.split('\n');
+
+    for (const line of lines) {
+      if ((currentChunk + line + '\n').length > maxLength) {
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
+          currentChunk = '';
+        }
+        
+        // If single line is too long, split it
+        if (line.length > maxLength) {
+          const words = line.split(' ');
+          let currentLine = '';
+          
+          for (const word of words) {
+            if ((currentLine + word + ' ').length > maxLength) {
+              if (currentLine) {
+                chunks.push(currentLine.trim());
+                currentLine = '';
+              }
+              currentLine = word + ' ';
+            } else {
+              currentLine += word + ' ';
+            }
+          }
+          
+          if (currentLine) {
+            currentChunk = currentLine;
+          }
+        } else {
+          currentChunk = line + '\n';
+        }
+      } else {
+        currentChunk += line + '\n';
+      }
+    }
+
+    if (currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+    }
+
+    return chunks;
+  }
+
+  /**
+   * Format currency for Indonesian Rupiah
+   */
+  private static formatCurrency(amount: number): string {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  }
+
+  /**
+   * Get status emoji for installation status
+   */
+  private static getStatusEmoji(status: string): string {
+    switch (status.toLowerCase()) {
+      case 'pending': return '⏳';
+      case 'preparing': return '🔄';
+      case 'running': return '⚡';
+      case 'completed': return '✅';
+      case 'failed': return '❌';
+      case 'manual_review': return '👀';
+      default: return '❓';
     }
   }
 
@@ -1169,8 +1492,8 @@ Jika belum punya akun, daftar dulu di website kami.`;
     message: string;
   }): Promise<boolean> {
     try {
-      const user = await apiService.getUserByTelegramId(userId);
-      if (!user || !user.telegram_user_id || !user.telegram_notifications) {
+      const user = await this.getConnectedUser(userId);
+      if (!user || !user.telegram_notifications) {
         return false; // User not connected or notifications disabled
       }
 
@@ -1185,36 +1508,11 @@ ${status} Status: ${data.status.toUpperCase()}
 
 ⏰ ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`;
 
-      await this.sendMessage(user.telegram_user_id, message, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '📊 Cek Status', callback_data: 'account_status' },
-              { text: '🌐 Dashboard', url: `${process.env['FRONTEND_URL'] || 'https://xmeprojects.com'}/dashboard` }
-            ]
-          ]
-        }
-      });
-
+      await this.sendMessage(user.telegram_user_id, message);
       return true;
     } catch (error: any) {
       logger.error('Error sending installation notification:', error);
       return false;
-    }
-  }
-
-  /**
-   * Get status emoji for installation status
-   */
-  private static getStatusEmoji(status: string): string {
-    switch (status.toLowerCase()) {
-      case 'pending': return '⏳';
-      case 'preparing': return '🔄';
-      case 'running': return '⚡';
-      case 'completed': return '✅';
-      case 'failed': return '❌';
-      case 'manual_review': return '👀';
-      default: return '❓';
     }
   }
 
@@ -1396,13 +1694,13 @@ ${status} Status: ${data.status.toUpperCase()}
       }
 
       const commands = [
-        { command: 'start', description: 'Mulai menggunakan bot' },
-        { command: 'menu', description: 'Tampilkan menu utama' },
-        { command: 'topup', description: 'Topup saldo akun' },
-        { command: 'install', description: 'Install Windows' },
-        { command: 'status', description: 'Cek status akun' },
-        { command: 'history', description: 'Lihat riwayat transaksi' },
-        { command: 'help', description: 'Bantuan penggunaan' },
+        { command: 'start', description: 'Mulai menggunakan bot atau hubungkan akun' },
+        { command: 'install', description: 'Install Windows: /install <ip> <vps_pass> <win_ver> <rdp_pass>' },
+        { command: 'myquota', description: 'Cek quota tersisa' },
+        { command: 'topup', description: 'Topup quota: /topup <quantity>' },
+        { command: 'winver', description: 'Lihat versi Windows tersedia' },
+        { command: 'history', description: 'Riwayat instalasi' },
+        { command: 'help', description: 'Bantuan penggunaan lengkap' },
         { command: 'cancel', description: 'Batalkan operasi saat ini' }
       ];
 

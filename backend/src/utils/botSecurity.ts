@@ -1,6 +1,7 @@
 import { logger } from './logger.js';
 import { RateLimiter, RATE_LIMITS } from './rateLimiter.js';
 import { getDatabase } from '../database/init.js';
+import { DateUtils } from './dateUtils.js';
 
 interface SecurityContext {
   userId: number;
@@ -178,11 +179,11 @@ export class BotSecurity {
   private async checkUserRegistration(userId: number): Promise<SecurityResult> {
     try {
       const db = this.initializeDb();
-      const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
+      const user = await db.get('SELECT * FROM users WHERE telegram_user_id = ? AND is_active = 1', [userId]);
       if (!user) {
         return {
           allowed: false,
-          reason: 'You need to register first. Please contact support.'
+          reason: 'Akun Telegram belum terhubung. Gunakan /start untuk menghubungkan akun.'
         };
       }
       
@@ -190,7 +191,7 @@ export class BotSecurity {
       if (!user.is_active) {
         return {
           allowed: false,
-          reason: 'Your account is not active. Please contact support.'
+          reason: 'Akun Anda tidak aktif. Silakan hubungi support.'
         };
       }
       
@@ -207,12 +208,12 @@ export class BotSecurity {
   private async checkAdminPermissions(userId: number): Promise<SecurityResult> {
     try {
       const db = this.initializeDb();
-      const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
+      const user = await db.get('SELECT * FROM users WHERE telegram_user_id = ? AND is_active = 1', [userId]);
       if (!user || !user.admin) {
         this.logger.warn(`Unauthorized admin command attempt by user ${userId}`);
         return {
           allowed: false,
-          reason: 'Insufficient permissions'
+          reason: 'Anda tidak memiliki akses admin.'
         };
       }
       
@@ -261,9 +262,23 @@ export class BotSecurity {
   }
 
   private async getRecentCommands(userId: number, timeWindowMs: number): Promise<any[]> {
-    // This would typically query a command history table
-    // For now, return empty array as placeholder
-    return [];
+    try {
+      const db = this.initializeDb();
+      const cutoffTime = DateUtils.addMinutesJakarta(-Math.floor(timeWindowMs / 60000));
+      
+      // This would query a bot_command_logs table if it exists
+      // For now, return empty array but log the attempt
+      this.logger.debug('Checking recent commands for suspicious activity', {
+        userId,
+        timeWindowMs,
+        cutoffTime
+      });
+      
+      return [];
+    } catch (error) {
+      this.logger.error('Failed to get recent commands', { error, userId });
+      return [];
+    }
   }
 
   public async logCommand(context: SecurityContext, result: 'success' | 'failed', error?: string): Promise<void> {
@@ -280,8 +295,24 @@ export class BotSecurity {
         timestamp: new Date().toISOString()
       });
       
-      // Here you could also store in database for audit trail
-      // await this.db.logBotCommand(context, result, error);
+      // Store in database for audit trail if bot_command_logs table exists
+      try {
+        const db = this.initializeDb();
+        await db.run(`
+          INSERT INTO bot_command_logs (telegram_user_id, command, args, result, error_message, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `, [
+          context.userId,
+          context.command,
+          JSON.stringify(context.args || []),
+          result,
+          error || null,
+          DateUtils.nowSQLite()
+        ]);
+      } catch (dbError) {
+        // Ignore database errors for command logging (table might not exist)
+        this.logger.debug('Could not log command to database (table might not exist)', { dbError });
+      }
     } catch (error) {
       this.logger.error('Failed to log command', { error, context });
     }
@@ -296,9 +327,31 @@ export class BotSecurity {
       
       // If duration specified, set a temporary block
       if (durationMs) {
-        // This would typically update user status in database
+        // Update user status in database for temporary block
+        try {
+          const db = this.initializeDb();
+          const blockUntil = DateUtils.addMinutesJakarta(Math.floor(durationMs / 60000));
+          await db.run(
+            'UPDATE users SET locked_until = ?, updated_at = ? WHERE telegram_user_id = ?',
+            [blockUntil, DateUtils.nowSQLite(), userId]
+          );
+        } catch (dbError) {
+          this.logger.error('Failed to update user block status in database', { dbError, userId });
+        }
+        
         this.logger.warn(`Temporarily blocked user ${userId}`, { reason, durationMs });
       } else {
+        // Permanent block - deactivate user
+        try {
+          const db = this.initializeDb();
+          await db.run(
+            'UPDATE users SET is_active = 0, updated_at = ? WHERE telegram_user_id = ?',
+            [DateUtils.nowSQLite(), userId]
+          );
+        } catch (dbError) {
+          this.logger.error('Failed to deactivate user in database', { dbError, userId });
+        }
+        
         this.logger.warn(`Permanently blocked user ${userId}`, { reason });
       }
       
@@ -313,6 +366,17 @@ export class BotSecurity {
       this.rateLimiter.unblock(identifier);
       this.rateLimiter.reset(identifier);
       
+      // Unblock in database
+      try {
+        const db = this.initializeDb();
+        await db.run(
+          'UPDATE users SET is_active = 1, locked_until = NULL, updated_at = ? WHERE telegram_user_id = ?',
+          [DateUtils.nowSQLite(), userId]
+        );
+      } catch (dbError) {
+        this.logger.error('Failed to unblock user in database', { dbError, userId });
+      }
+      
       this.logger.info(`Unblocked user ${userId}`);
     } catch (error) {
       this.logger.error('Failed to unblock user', { error, userId });
@@ -324,7 +388,11 @@ export class BotSecurity {
       rateLimiter: this.rateLimiter.getStats(),
       allowedCommands: this.ALLOWED_COMMANDS.length,
       adminCommands: this.ADMIN_COMMANDS.length,
-      registeredUserCommands: this.REGISTERED_USER_COMMANDS.length
+      registeredUserCommands: this.REGISTERED_USER_COMMANDS.length,
+      lastCheck: new Date().toISOString()
     };
   }
+}
+
+export { BotSecurity };
 }

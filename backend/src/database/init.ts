@@ -321,6 +321,26 @@ async function createTables(): Promise<void> {
     await db.run('CREATE INDEX IF NOT EXISTS idx_telegram_tokens_token ON telegram_connection_tokens (token)');
     await db.run('CREATE INDEX IF NOT EXISTS idx_telegram_tokens_expires ON telegram_connection_tokens (expires_at)');
     
+    // Bot command logs table (optional, for audit)
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS bot_command_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        telegram_user_id INTEGER,
+        command TEXT,
+        args TEXT,
+        result TEXT, -- 'success' or 'failed'
+        error_message TEXT,
+        created_at DATETIME DEFAULT '${jakartaTime}',
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      )
+    `);
+
+    // Create indexes for bot_command_logs
+    await db.run('CREATE INDEX IF NOT EXISTS idx_bot_logs_telegram_user_id ON bot_command_logs (telegram_user_id)');
+    await db.run('CREATE INDEX IF NOT EXISTS idx_bot_logs_command ON bot_command_logs (command)');
+    await db.run('CREATE INDEX IF NOT EXISTS idx_bot_logs_created_at ON bot_command_logs (created_at)');
+    
     logger.info('Database tables created successfully with Asia/Jakarta timezone');
   } catch (error) {
     logger.error('Error creating database tables:', error);
