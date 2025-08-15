@@ -76,6 +76,8 @@ import { connectRedis } from './config/redis.js';
 // Services and utilities
 import { emailService } from './services/emailService.js';
 import { DateUtils } from './utils/dateUtils.js';
+import { TelegramBotService } from './services/telegramBotService.js';
+import { BotMonitor } from './utils/botMonitor.js';
 
 const app = express();
 const PORT = process.env['PORT'] || 3001;
@@ -386,6 +388,34 @@ async function startServer() {
       // Don't exit - this is not critical for server startup
     }
 
+    // Initialize Telegram Bot Service
+    try {
+      if (process.env['TELEGRAM_BOT_TOKEN']) {
+        // Check if polling mode is enabled (to avoid webhook rate limits)
+        const usePolling = process.env['TELEGRAM_USE_POLLING'] === 'true';
+        const result = await TelegramBotService.startBot(usePolling);
+        if (result.success) {
+          logger.info(`Telegram Bot started successfully in ${usePolling ? 'polling' : 'webhook'} mode`);
+          
+          // Start BOT monitoring
+          try {
+            const botMonitor = BotMonitor.getInstance();
+            botMonitor.start();
+            logger.info('BOT monitoring started successfully');
+          } catch (monitorError) {
+            logger.error('Failed to start BOT monitoring:', monitorError);
+          }
+        } else {
+          logger.warn('Failed to start Telegram Bot:', result.message);
+        }
+      } else {
+        logger.warn('TELEGRAM_BOT_TOKEN not found - Telegram Bot will not start');
+      }
+    } catch (error) {
+      logger.error('Failed to initialize Telegram Bot:', error);
+      // Don't exit - this is not critical for server startup
+    }
+
     // Start server
     app.listen(PORT, () => {
       logger.info(`🚀 XME Projects API server running on port ${PORT}`);
@@ -399,13 +429,37 @@ async function startServer() {
 }
 
 // Handle graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down gracefully');
+  try {
+    // Stop BOT monitoring
+    const botMonitor = BotMonitor.getInstance();
+    botMonitor.stop();
+    logger.info('BOT monitoring stopped successfully');
+    
+    // Stop Telegram Bot
+    await TelegramBotService.stopBot();
+    logger.info('Telegram Bot stopped successfully');
+  } catch (error) {
+    logger.error('Error during graceful shutdown:', error);
+  }
   process.exit(0);
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   logger.info('SIGINT received, shutting down gracefully');
+  try {
+    // Stop BOT monitoring
+    const botMonitor = BotMonitor.getInstance();
+    botMonitor.stop();
+    logger.info('BOT monitoring stopped successfully');
+    
+    // Stop Telegram Bot
+    await TelegramBotService.stopBot();
+    logger.info('Telegram Bot stopped successfully');
+  } catch (error) {
+    logger.error('Error during graceful shutdown:', error);
+  }
   process.exit(0);
 });
 

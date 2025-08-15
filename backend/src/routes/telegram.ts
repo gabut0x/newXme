@@ -1,75 +1,17 @@
 import express from 'express';
 import { Request, Response } from 'express';
-import { TelegramService } from '../services/telegramService.js';
+import { TelegramBotService } from '../services/telegramBotService.js';
 import { logger } from '../utils/logger.js';
 import { authenticateToken, asyncHandler } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
 
 const router = express.Router();
 
-// Telegram webhook handler
-router.post('/webhook',
-  asyncHandler(async (req: Request, res: Response) => {
-    try {
-      const update = req.body;
-      
-      logger.info('Received Telegram webhook update:', {
-        updateId: update.update_id,
-        messageId: update.message?.message_id,
-        fromUser: update.message?.from?.username || update.message?.from?.id
-      });
+// Webhook routes disabled - using polling mode instead
+// router.post('/webhook', ...) - removed because bot now uses polling mode
 
-      // Process the update
-      await TelegramService.processUpdate(update);
-
-      // Respond with 200 OK to acknowledge receipt
-      res.status(200).json({ ok: true });
-    } catch (error) {
-      logger.error('Error processing Telegram webhook:', error);
-      // Still respond with 200 to prevent Telegram from retrying
-      res.status(200).json({ ok: false, error: 'Internal server error' });
-    }
-  })
-);
-
-// Set webhook URL (admin only)
-router.post('/set-webhook',
-  authenticateToken,
-  requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    const { webhook_url } = req.body;
-    
-    if (!webhook_url) {
-      res.status(400).json({
-        success: false,
-        message: 'Webhook URL is required'
-      });
-      return;
-    }
-
-    try {
-      const success = await TelegramService.setWebhook(webhook_url);
-      
-      if (success) {
-        res.json({
-          success: true,
-          message: 'Webhook set successfully'
-        });
-      } else {
-        res.status(500).json({
-          success: false,
-          message: 'Failed to set webhook'
-        });
-      }
-    } catch (error) {
-      logger.error('Error setting webhook:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Internal server error'
-      });
-    }
-  })
-);
+// Webhook setup routes disabled - using polling mode instead
+// router.post('/set-webhook', ...) - removed because bot now uses polling mode
 
 // Get bot info (admin only)
 router.get('/bot-info',
@@ -77,7 +19,7 @@ router.get('/bot-info',
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     try {
-      const botInfo = await TelegramService.getBotInfo();
+      const botInfo = await TelegramBotService.getBotInfo();
       
       if (botInfo) {
         res.json({
@@ -100,6 +42,72 @@ router.get('/bot-info',
   })
 );
 
+// Set bot commands (admin only)
+router.post('/set-commands',
+  authenticateToken,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const success = await TelegramBotService.setMyCommands();
+      
+      if (success) {
+        // Get bot commands to confirm
+        const botCommands = await TelegramBotService.getMyCommands();
+        
+        res.json({
+          success: true,
+          message: 'Bot commands set successfully',
+          data: {
+            commands: botCommands
+          }
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          message: 'Failed to set bot commands'
+        });
+      }
+    } catch (error) {
+      logger.error('Error setting bot commands:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error'
+      });
+    }
+  })
+);
+
+// Get bot commands (admin only)
+router.get('/commands',
+  authenticateToken,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const botCommands = await TelegramBotService.getMyCommands();
+      
+      if (botCommands !== null) {
+        res.json({
+          success: true,
+          data: {
+            commands: botCommands
+          }
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          message: 'Failed to get bot commands'
+        });
+      }
+    } catch (error) {
+      logger.error('Error getting bot commands:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error'
+      });
+    }
+  })
+);
+
 // Setup webhook automatically (admin only)
 router.post('/setup',
   authenticateToken,
@@ -107,40 +115,35 @@ router.post('/setup',
   asyncHandler(async (req: Request, res: Response) => {
     try {
       // Get bot info first
-      const botInfo = await TelegramService.getBotInfo();
+      const botInfo = await TelegramBotService.getBotInfo();
       logger.info('Bot Info:', botInfo);
       
-      // Set webhook with current server URL
-      const webhookUrl = `${process.env['APP_URL'] || 'http://localhost:3001'}/api/telegram/webhook`;
-      const success = await TelegramService.setWebhook(webhookUrl);
+      // Set bot commands (still useful for polling mode)
+      const commandsSet = await TelegramBotService.setMyCommands();
+      logger.info('Bot commands set:', commandsSet);
       
-      if (success) {
-        // Get webhook info to confirm
-        const webhookInfo = await TelegramService.getWebhookInfo();
-        logger.info('Webhook Info:', webhookInfo);
-        
-        res.json({
-          success: true,
-          message: 'Telegram bot setup completed successfully',
-          data: {
-            botInfo,
-            webhookUrl,
-            webhookInfo,
-            instructions: [
-              'Webhook has been set up successfully',
-              `Bot username: @${botInfo?.username || 'Unknown'}`,
-              'Users can now connect their Telegram accounts',
-              'Check the logs for any connection attempts'
-            ]
-          }
-        });
-      } else {
-        res.status(500).json({
-          success: false,
-          message: 'Failed to set webhook',
-          data: { botInfo, webhookUrl }
-        });
-      }
+      // Get bot commands to confirm
+      const botCommands = await TelegramBotService.getMyCommands();
+      logger.info('Bot Commands:', botCommands);
+      
+      res.json({
+        success: true,
+        message: 'Telegram bot setup completed successfully (polling mode)',
+        data: {
+          botInfo,
+          mode: 'polling',
+          botCommands,
+          commandsSet,
+          instructions: [
+            'Bot is running in polling mode',
+            `Bot username: @${botInfo?.username || 'Unknown'}`,
+            'Bot commands have been configured',
+            'Users can now connect their Telegram accounts',
+            'Available commands: /start, /help, /status, /topup',
+            'Bot will automatically receive messages via polling'
+          ]
+        }
+      });
     } catch (error: any) {
       logger.error('Error setting up Telegram bot:', error);
       res.status(500).json({
@@ -152,27 +155,8 @@ router.post('/setup',
   })
 );
 
-// Get webhook info (admin only)
-router.get('/webhook-info',
-  authenticateToken,
-  requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
-    try {
-      const webhookInfo = await TelegramService.getWebhookInfo();
-      
-      res.json({
-        success: true,
-        data: webhookInfo
-      });
-    } catch (error) {
-      logger.error('Error getting webhook info:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Internal server error'
-      });
-    }
-  })
-);
+// Webhook info route disabled - using polling mode instead
+// router.get('/webhook-info', ...) - removed because bot now uses polling mode
 
 
 export { router as telegramRoutes };

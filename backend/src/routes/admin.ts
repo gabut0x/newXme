@@ -31,6 +31,8 @@ import { tripayService } from '../services/tripayService.js';
 import { DatabaseSecurity } from '../utils/dbSecurity.js';
 import { DateUtils } from '../utils/dateUtils.js';
 import { logger } from '../utils/logger.js';
+import { BotSecurity } from '../utils/botSecurity.js';
+import { RateLimiter } from '../utils/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -955,5 +957,472 @@ router.post('/payment-methods/sync', asyncHandler(async (req: AuthenticatedReque
     });
   }
 }));
+
+// Telegram Bot Management Routes
+router.get('/telegram-bot/status',
+  auditLogger('ADMIN_GET_BOT_STATUS'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const status = TelegramBotService.getStatus();
+      
+      res.json({
+        success: true,
+        message: 'Bot status retrieved successfully',
+        data: status
+      });
+    } catch (error) {
+      logger.error('Error getting bot status:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get bot status',
+        error: 'INTERNAL_ERROR'
+      });
+    }
+  })
+);
+
+router.post('/telegram-bot/start',
+  auditLogger('ADMIN_START_BOT'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      // Allow admin to specify polling mode to avoid webhook rate limits
+      const usePolling = req.body.usePolling === true || process.env['TELEGRAM_USE_POLLING'] === 'true';
+      const result = await TelegramBotService.startBot(usePolling);
+      
+      if (result.success) {
+        logger.info(`Telegram bot started by admin user ${req.user?.id} in ${usePolling ? 'polling' : 'webhook'} mode`);
+        res.json({
+          success: true,
+          message: `Bot started successfully in ${usePolling ? 'polling' : 'webhook'} mode`,
+          data: { status: 'running', mode: usePolling ? 'polling' : 'webhook' }
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: result.message || 'Failed to start bot',
+          error: 'BOT_START_FAILED'
+        });
+      }
+    } catch (error) {
+      logger.error('Error starting bot:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to start bot',
+        error: 'INTERNAL_ERROR'
+      });
+    }
+  })
+);
+
+router.post('/telegram-bot/stop',
+  auditLogger('ADMIN_STOP_BOT'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const result = await TelegramBotService.stopBot();
+      
+      if (result.success) {
+        logger.info(`Telegram bot stopped by admin user ${req.user?.id}`);
+        res.json({
+          success: true,
+          message: 'Bot stopped successfully',
+          data: { status: 'stopped' }
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: result.message || 'Failed to stop bot',
+          error: 'BOT_STOP_FAILED'
+        });
+      }
+    } catch (error) {
+      logger.error('Error stopping bot:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to stop bot',
+        error: 'INTERNAL_ERROR'
+      });
+    }
+  })
+);
+
+router.post('/telegram-bot/restart',
+  auditLogger('ADMIN_RESTART_BOT'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const result = await TelegramBotService.restartBot();
+      
+      if (result.success) {
+        logger.info(`Telegram bot restarted by admin user ${req.user?.id}`);
+        res.json({
+          success: true,
+          message: 'Bot restarted successfully',
+          data: { status: 'running' }
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: result.message || 'Failed to restart bot',
+          error: 'BOT_RESTART_FAILED'
+        });
+      }
+    } catch (error) {
+      logger.error('Error restarting bot:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to restart bot',
+        error: 'INTERNAL_ERROR'
+      });
+    }
+  })
+);
+
+router.get('/telegram-bot/stats',
+  auditLogger('ADMIN_GET_BOT_STATS'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const stats = TelegramBotService.getStats();
+      
+      res.json({
+        success: true,
+        message: 'Bot statistics retrieved successfully',
+        data: stats
+      });
+    } catch (error) {
+      logger.error('Error getting bot stats:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get bot statistics',
+        error: 'INTERNAL_ERROR'
+      });
+    }
+  })
+);
+
+// Get detailed BOT metrics
+router.get('/telegram-bot/metrics',
+  auditLogger('ADMIN_GET_BOT_METRICS'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const metrics = TelegramBotService.getDetailedMetrics();
+      
+      res.json({
+        success: true,
+        data: metrics
+      });
+    } catch (error) {
+      logger.error('Error getting bot metrics:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get bot metrics'
+      });
+    }
+  })
+);
+
+// Get BOT performance metrics
+router.get('/telegram-bot/performance',
+  auditLogger('ADMIN_GET_BOT_PERFORMANCE'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const performance = TelegramBotService.getPerformanceMetrics();
+      
+      res.json({
+        success: true,
+        data: performance
+      });
+    } catch (error) {
+      logger.error('Error getting bot performance:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get bot performance'
+      });
+    }
+  })
+);
+
+// Reset BOT metrics
+router.post('/telegram-bot/reset-metrics',
+  auditLogger('ADMIN_RESET_BOT_METRICS'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      TelegramBotService.resetMetrics();
+      
+      res.json({
+        success: true,
+        message: 'Bot metrics reset successfully'
+      });
+    } catch (error) {
+      logger.error('Error resetting bot metrics:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to reset bot metrics'
+      });
+    }
+  })
+);
+
+// Get BOT monitor status
+router.get('/telegram-bot/monitor',
+  auditLogger('ADMIN_GET_BOT_MONITOR'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { BotMonitor } = await import('../utils/botMonitor.js');
+      const monitor = BotMonitor.getInstance();
+      const status = monitor.getStatus();
+      
+      // Flatten the structure to match frontend expectations
+      const responseData = {
+        isRunning: status.isRunning,
+        alertThresholds: status.config.alertThresholds,
+        nextCleanup: status.nextCleanup,
+        lastHealthCheck: status.lastHealthCheck,
+        config: status.config
+      };
+      
+      res.json({
+        success: true,
+        data: responseData
+      });
+    } catch (error) {
+      logger.error('Error getting bot monitor status:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get bot monitor status'
+      });
+    }
+  })
+);
+
+// Update BOT monitor configuration
+router.put('/telegram-bot/monitor/config',
+  auditLogger('ADMIN_UPDATE_BOT_MONITOR_CONFIG'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { BotMonitor } = await import('../utils/botMonitor.js');
+      const monitor = BotMonitor.getInstance();
+      
+      const { cleanupInterval, maxDailyStatsAge, alertThresholds } = req.body;
+      
+      monitor.updateConfig({
+        ...(cleanupInterval && { cleanupInterval }),
+        ...(maxDailyStatsAge && { maxDailyStatsAge }),
+        ...(alertThresholds && { alertThresholds })
+      });
+      
+      res.json({
+        success: true,
+        message: 'Bot monitor configuration updated successfully'
+      });
+    } catch (error) {
+      logger.error('Error updating bot monitor config:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to update bot monitor configuration'
+      });
+    }
+  })
+);
+
+// Bot Security Management Routes
+router.get('/telegram-bot/security/stats',
+  auditLogger('ADMIN_GET_BOT_SECURITY_STATS'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const security = BotSecurity.getInstance();
+      const stats = security.getSecurityStats();
+      
+      res.json({
+        success: true,
+        message: 'Bot security stats retrieved successfully',
+        data: stats
+      });
+    } catch (error) {
+      logger.error('Error getting bot security stats:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get bot security stats',
+        error: 'Internal server error'
+      });
+    }
+  })
+);
+
+router.post('/telegram-bot/security/block-user',
+  auditLogger('ADMIN_BLOCK_BOT_USER'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { userId, reason, durationMs } = req.body;
+      
+      if (!userId || !reason) {
+        res.status(400).json({
+          success: false,
+          message: 'User ID and reason are required'
+        });
+        return;
+      }
+      
+      const security = BotSecurity.getInstance();
+      await security.blockUser(userId, reason, durationMs);
+      
+      res.json({
+        success: true,
+        message: `User ${userId} blocked successfully`,
+        data: {
+          userId,
+          reason,
+          durationMs,
+          blockedAt: new Date().toISOString()
+        }
+      });
+    } catch (error) {
+      logger.error('Error blocking user:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to block user',
+        error: 'Internal server error'
+      });
+    }
+  })
+);
+
+router.post('/telegram-bot/security/unblock-user',
+  auditLogger('ADMIN_UNBLOCK_BOT_USER'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { userId } = req.body;
+      
+      if (!userId) {
+        res.status(400).json({
+          success: false,
+          message: 'User ID is required'
+        });
+        return;
+      }
+      
+      const security = BotSecurity.getInstance();
+      await security.unblockUser(userId);
+      
+      res.json({
+        success: true,
+        message: `User ${userId} unblocked successfully`,
+        data: {
+          userId,
+          unblockedAt: new Date().toISOString()
+        }
+      });
+    } catch (error) {
+      logger.error('Error unblocking user:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to unblock user',
+        error: 'Internal server error'
+      });
+    }
+  })
+);
+
+// Rate Limiter Management Routes
+router.get('/telegram-bot/rate-limiter/stats',
+  auditLogger('ADMIN_GET_RATE_LIMITER_STATS'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const rateLimiter = RateLimiter.getInstance();
+      const stats = rateLimiter.getStats();
+      
+      res.json({
+        success: true,
+        message: 'Rate limiter stats retrieved successfully',
+        data: stats
+      });
+    } catch (error) {
+      logger.error('Error getting rate limiter stats:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get rate limiter stats',
+        error: 'Internal server error'
+      });
+    }
+  })
+);
+
+router.post('/telegram-bot/rate-limiter/reset',
+  auditLogger('ADMIN_RESET_RATE_LIMITER'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { identifier } = req.body;
+      
+      if (!identifier) {
+        res.status(400).json({
+          success: false,
+          message: 'Identifier is required'
+        });
+        return;
+      }
+      
+      const rateLimiter = RateLimiter.getInstance();
+      rateLimiter.reset(identifier);
+      
+      res.json({
+        success: true,
+        message: `Rate limit reset for ${identifier}`,
+        data: {
+          identifier,
+          resetAt: new Date().toISOString()
+        }
+      });
+    } catch (error) {
+      logger.error('Error resetting rate limit:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to reset rate limit',
+        error: 'Internal server error'
+      });
+    }
+  })
+);
+
+router.post('/telegram-bot/rate-limiter/unblock',
+  auditLogger('ADMIN_UNBLOCK_RATE_LIMITER'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { identifier } = req.body;
+      
+      if (!identifier) {
+        res.status(400).json({
+          success: false,
+          message: 'Identifier is required'
+        });
+        return;
+      }
+      
+      const rateLimiter = RateLimiter.getInstance();
+      rateLimiter.unblock(identifier);
+      
+      res.json({
+        success: true,
+        message: `Rate limit unblocked for ${identifier}`,
+        data: {
+          identifier,
+          unblockedAt: new Date().toISOString()
+        }
+      });
+    } catch (error) {
+      logger.error('Error unblocking rate limit:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to unblock rate limit',
+        error: 'Internal server error'
+      });
+    }
+  })
+);
 
 export default router;

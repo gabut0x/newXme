@@ -956,11 +956,11 @@ router.post('/connect-telegram',
     }
 
     try {
-      // Import TelegramService
-      const { TelegramService } = await import('../services/telegramService.js');
+      // Import TelegramBotService
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
       
       // Generate connection token and bot link
-      const connectionData = await TelegramService.generateConnectionToken(req.user.id);
+      const connectionData = await TelegramBotService.generateConnectionToken(req.user.id);
       
       logger.info('Telegram connection initiated:', {
         userId: req.user.id,

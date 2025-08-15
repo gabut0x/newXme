@@ -165,8 +165,8 @@ export class NotificationService {
 
     // Send Telegram notification if user has enabled it
     try {
-      const { TelegramService } = await import('./telegramService.js');
-      const telegramSent = await TelegramService.sendInstallationNotification(update.userId, {
+      const { TelegramBotService } = await import('./telegramBotService.js');
+      const telegramSent = await TelegramBotService.sendInstallationNotification(update.userId, {
         status: update.status,
         ip: update.ip || 'Unknown',
         winVersion: update.winVersion || 'Unknown',

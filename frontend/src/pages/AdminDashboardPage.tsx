@@ -51,7 +51,9 @@ import {
   LayoutDashboard,
   MessageSquare,
   Webhook,
-  Bot
+  Bot,
+  Play,
+  Square
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -76,6 +78,8 @@ export default function AdminDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [customWebhookModalOpen, setCustomWebhookModalOpen] = useState(false);
+  const [customWebhookUrl, setCustomWebhookUrl] = useState('');
   
   // Data states
   const [windowsVersions, setWindowsVersions] = useState<WindowsVersion[]>([]);
@@ -92,6 +96,104 @@ export default function AdminDashboardPage() {
     webhookInfo: null,
     isLoading: false
   });
+  
+  const [botStatus, setBotStatus] = useState<{
+    isRunning: boolean;
+    startedAt?: string;
+    lastActivity?: string;
+    messageCount: number;
+    errorCount: number;
+    commandCount: number;
+    userCount: number;
+    lastError?: string;
+    lastErrorAt?: string;
+    isLoading: boolean;
+  }>({
+    isRunning: false,
+    messageCount: 0,
+    errorCount: 0,
+    commandCount: 0,
+    userCount: 0,
+    isLoading: false
+  });
+  
+
+  
+  const [botMonitor, setBotMonitor] = useState<{
+    isLoading: boolean;
+    [key: string]: any;
+  }>({
+    isLoading: false
+  });
+  
+
+
+
+
+
+
+  const loadBotStatus = async () => {
+    try {
+      setBotStatus(prev => ({ ...prev, isLoading: true }));
+      
+      const token = apiService.getAuthToken();
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+      
+      const response = await fetch(`${apiBaseUrl}/admin/telegram-bot/status`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setBotStatus({
+          ...result.data,
+          isLoading: false
+        });
+      } else {
+        throw new Error('Failed to load bot status');
+      }
+    } catch (error) {
+      console.error('Error loading bot status:', error);
+      setBotStatus(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+  
+
+
+  const loadBotMonitor = async () => {
+    try {
+      setBotMonitor(prev => ({ ...prev, isLoading: true }));
+      
+      const token = apiService.getAuthToken();
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+      
+      const response = await fetch(`${apiBaseUrl}/admin/telegram-bot/monitor`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setBotMonitor({
+          ...result.data,
+          isLoading: false
+        });
+      } else {
+        throw new Error('Failed to load bot monitor');
+      }
+    } catch (error) {
+      console.error('Error loading bot monitor:', error);
+      setBotMonitor(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
+
+
+
+
+
+
+
+
   
   // Dialog states
   const [windowsDialog, setWindowsDialog] = useState(false);
@@ -145,6 +247,8 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (activeTab === 'telegram') {
       loadTelegramStatus();
+      loadBotStatus();
+      loadBotMonitor();
     }
   }, [activeTab]);
 
@@ -483,17 +587,25 @@ export default function AdminDashboardPage() {
       const token = apiService.getAuthToken();
       const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
       
-      const [botResponse, webhookResponse] = await Promise.all([
-        fetch(`${apiBaseUrl}/telegram/bot-info`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${apiBaseUrl}/telegram/webhook-info`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-      ]);
-
+      // Always get bot info
+      const botResponse = await fetch(`${apiBaseUrl}/telegram/bot-info`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
       const botData = botResponse.ok ? await botResponse.json() : null;
-      const webhookData = webhookResponse.ok ? await webhookResponse.json() : null;
+      
+      // Only get webhook info if bot is running and not in polling mode
+      let webhookData = null;
+      if (botStatus.isRunning && process.env.NODE_ENV === 'production') {
+        try {
+          const webhookResponse = await fetch(`${apiBaseUrl}/telegram/webhook-info`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          webhookData = webhookResponse.ok ? await webhookResponse.json() : null;
+        } catch (webhookError) {
+          console.warn('Webhook info unavailable (likely in polling mode):', webhookError);
+        }
+      }
 
       setTelegramStatus({
         botInfo: botData?.data || null,
@@ -579,6 +691,102 @@ export default function AdminDashboardPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleStartBotPolling = async () => {
+    try {
+      setIsSubmitting(true);
+      
+      const token = apiService.getAuthToken();
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+      
+      const response = await fetch(`${apiBaseUrl}/admin/telegram-bot/start`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ usePolling: true })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        toast({
+          title: 'Bot started in polling mode',
+          description: 'Telegram bot is now running in polling mode'
+        });
+        // Add small delay to ensure backend status is updated
+        setTimeout(async () => {
+          await loadBotStatus();
+        }, 500);
+      } else {
+        throw new Error(result.message || 'Failed to start bot');
+      }
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to start bot',
+        description: error.message || 'Failed to start bot in polling mode'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStopBot = async () => {
+    try {
+      setIsSubmitting(true);
+      
+      const token = apiService.getAuthToken();
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+      
+      const response = await fetch(`${apiBaseUrl}/admin/telegram-bot/stop`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        toast({
+          title: 'Bot stopped',
+          description: 'Telegram bot has been stopped'
+        });
+        // Add small delay to ensure backend status is updated
+        setTimeout(async () => {
+          await loadBotStatus();
+        }, 500);
+      } else {
+        throw new Error(result.message || 'Failed to stop bot');
+      }
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to stop bot',
+        description: error.message || 'Failed to stop bot'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCustomWebhookSubmit = async () => {
+    if (!customWebhookUrl.trim()) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid URL',
+        description: 'Please enter a valid webhook URL'
+      });
+      return;
+    }
+    
+    await handleSetCustomWebhook(customWebhookUrl);
+    setCustomWebhookModalOpen(false);
+    setCustomWebhookUrl('');
   };
 
   const getWindowsVersionName = (slug: string) => {
@@ -939,6 +1147,8 @@ export default function AdminDashboardPage() {
                     </div>
                   </CardContent>
                 </Card>
+
+
               </div>
             )}
 
@@ -1531,11 +1741,15 @@ export default function AdminDashboardPage() {
                     <p className="text-xs md:text-sm text-muted-foreground">Configure and manage Telegram bot integration</p>
                   </div>
                   <Button
-                    onClick={() => loadTelegramStatus()}
-                    disabled={telegramStatus.isLoading}
+                    onClick={() => {
+                      loadTelegramStatus();
+                      loadBotStatus();
+                      loadBotMonitor();
+                    }}
+                    disabled={telegramStatus.isLoading || botStatus.isLoading}
                     variant="outline"
                   >
-                    {telegramStatus.isLoading ? (
+                    {(telegramStatus.isLoading || botStatus.isLoading) ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
                     ) : (
                       <Settings className="h-4 w-4 mr-2" />
@@ -1590,134 +1804,122 @@ export default function AdminDashboardPage() {
                     </CardContent>
                   </Card>
 
-                  {/* Webhook Status Card */}
+                  {/* Bot Control Card */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <Webhook className="h-5 w-5" />
-                        Webhook Status
+                        <Bot className="h-5 w-5" />
+                        Bot Control
                       </CardTitle>
+                      <CardDescription>
+                        Manage Telegram bot status and operations
+                      </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      {telegramStatus.webhookInfo ? (
-                        <div className="space-y-3">
-                          {telegramStatus.webhookInfo.url ? (
-                            <div className="flex items-center gap-2">
-                              <CheckCircle className="h-4 w-4 text-green-600" />
-                              <span className="text-sm font-medium">Webhook Active</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              <AlertCircle className="h-4 w-4 text-yellow-600" />
-                              <span className="text-sm font-medium">No Webhook Set</span>
-                            </div>
-                          )}
-                          <div className="space-y-2 text-sm">
+                      <div className="space-y-4">
+                        {/* Bot Status Display */}
+                        <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            {botStatus.isRunning ? (
+                              <>
+                                <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
+                                <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                                  Bot Running
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <div className="h-2 w-2 bg-red-500 rounded-full" />
+                                <span className="text-sm font-medium text-red-700 dark:text-red-400">
+                                  Bot Stopped
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          <Badge variant={botStatus.isRunning ? "default" : "secondary"}>
+                            {botStatus.isRunning ? "Active" : "Inactive"}
+                          </Badge>
+                        </div>
+
+                        {/* Control Buttons */}
+                        <div className="flex gap-3">
+                          <Button
+                            onClick={handleStartBotPolling}
+                            disabled={isSubmitting || botStatus.isRunning}
+                            className="flex items-center gap-2 flex-1"
+                            variant={botStatus.isRunning ? "secondary" : "default"}
+                          >
+                            {isSubmitting ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4" />
+                            )}
+                            {botStatus.isRunning ? 'Already Running' : 'Start Bot'}
+                          </Button>
+                          <Button
+                            onClick={handleStopBot}
+                            disabled={isSubmitting || !botStatus.isRunning}
+                            variant="destructive"
+                            className="flex items-center gap-2 flex-1"
+                          >
+                            {isSubmitting ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Square className="h-4 w-4" />
+                            )}
+                            Stop Bot
+                          </Button>
+                        </div>
+
+                        {/* Bot Information */}
+                        <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
+                          <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2 text-sm">
+                            Bot Information
+                          </h4>
+                          <div className="text-xs text-blue-800 dark:text-blue-200 space-y-1">
                             <div className="flex justify-between">
-                              <span className="text-muted-foreground">URL:</span>
-                              <span className="font-mono text-xs break-all">
-                                {telegramStatus.webhookInfo.url || 'Not set'}
+                              <span>Mode:</span>
+                              <span className="font-mono bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 rounded">
+                                Polling
                               </span>
                             </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Pending Updates:</span>
-                              <Badge variant="outline">
-                                {telegramStatus.webhookInfo.pending_update_count || 0}
-                              </Badge>
-                            </div>
-                            {telegramStatus.webhookInfo.last_error_message && (
-                              <div className="mt-3 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
-                                <p className="text-xs text-destructive font-medium">Last Error:</p>
-                                <p className="text-xs text-destructive">
-                                  {telegramStatus.webhookInfo.last_error_message}
-                                </p>
+                            {botStatus.startedAt && (
+                              <div className="flex justify-between">
+                                <span>Started:</span>
+                                <span>{new Date(botStatus.startedAt).toLocaleString()}</span>
+                              </div>
+                            )}
+                            {botStatus.messageCount !== undefined && (
+                              <div className="flex justify-between">
+                                <span>Messages:</span>
+                                <span>{botStatus.messageCount}</span>
                               </div>
                             )}
                           </div>
                         </div>
-                      ) : (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          <span className="text-sm">Loading webhook info...</span>
-                        </div>
-                      )}
+                      </div>
                     </CardContent>
                   </Card>
                 </div>
 
-                {/* Webhook Management */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Webhook Management</CardTitle>
-                    <CardDescription>Configure webhook URL for receiving Telegram updates</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div className="flex gap-4">
-                        <Button
-                          onClick={handleSetupWebhook}
-                          disabled={isSubmitting}
-                          className="flex items-center gap-2"
-                        >
-                          {isSubmitting ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Settings className="h-4 w-4" />
-                          )}
-                          Auto Setup Webhook
-                        </Button>
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            const url = prompt('Enter custom webhook URL:');
-                            if (url) handleSetCustomWebhook(url);
-                          }}
-                          disabled={isSubmitting}
-                        >
-                          <Webhook className="h-4 w-4 mr-2" />
-                          Set Custom URL
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          onClick={() => handleSetCustomWebhook('')}
-                          disabled={isSubmitting}
-                        >
-                          <X className="h-4 w-4 mr-2" />
-                          Remove Webhook
-                        </Button>
-                      </div>
-
-                      <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
-                        <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">
-                          Setup Instructions
-                        </h4>
-                        <div className="text-sm text-blue-800 dark:text-blue-200 space-y-1">
-                          <p>• <strong>Auto Setup:</strong> Uses APP_URL environment variable</p>
-                          <p>• <strong>Custom URL:</strong> For development with ngrok or custom domains</p>
-                          <p>• <strong>Remove:</strong> Disables webhook (useful for troubleshooting)</p>
-                        </div>
-                      </div>
-
-                      {telegramStatus.botInfo?.username && (
-                        <div className="p-4 bg-green-50 dark:bg-green-950/20 rounded-lg">
-                          <h4 className="font-medium text-green-900 dark:text-green-100 mb-2">
-                            Bot Link
-                          </h4>
-                          <p className="text-sm text-green-800 dark:text-green-200">
-                            <a
-                              href={`https://t.me/${telegramStatus.botInfo.username}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="underline"
-                            >
-                              https://t.me/{telegramStatus.botInfo.username}
-                            </a>
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+                {/* Bot Link - Show regardless of mode */}
+                {telegramStatus.botInfo?.username && (
+                  <div className="p-4 bg-green-50 dark:bg-green-950/20 rounded-lg">
+                    <h4 className="font-medium text-green-900 dark:text-green-100 mb-2">
+                      Bot Link
+                    </h4>
+                    <p className="text-sm text-green-800 dark:text-green-200">
+                      <a
+                        href={`https://t.me/${telegramStatus.botInfo.username}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                      >
+                        https://t.me/{telegramStatus.botInfo.username}
+                      </a>
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1882,6 +2084,63 @@ export default function AdminDashboardPage() {
                 <>
                   <Coins className="mr-2 h-4 w-4" />
                   Update Quota
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Custom Webhook URL Modal */}
+      <Dialog open={customWebhookModalOpen} onOpenChange={setCustomWebhookModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set Custom Webhook URL</DialogTitle>
+            <DialogDescription>
+              Enter a custom webhook URL for receiving Telegram updates. This is useful for development with ngrok or custom domains.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="webhook-url">Webhook URL</Label>
+              <Input
+                id="webhook-url"
+                type="url"
+                placeholder="https://your-domain.com/api/telegram/webhook"
+                value={customWebhookUrl}
+                onChange={(e) => setCustomWebhookUrl(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                <strong>Note:</strong> The URL must be HTTPS and accessible from the internet. For local development, consider using ngrok or similar tools.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCustomWebhookModalOpen(false);
+                setCustomWebhookUrl('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCustomWebhookSubmit}
+              disabled={isSubmitting || !customWebhookUrl.trim()}
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Setting...
+                </>
+              ) : (
+                <>
+                  <Webhook className="mr-2 h-4 w-4" />
+                  Set Webhook
                 </>
               )}
             </Button>
