@@ -4,7 +4,7 @@ import { logger } from '../utils/logger.js';
 import { DateUtils } from '../utils/dateUtils.js';
 import { BotSecurity } from '../utils/botSecurity.js';
 import { RateLimiter } from '../utils/rateLimiter.js';
-import { apiService } from './apiService.js';
+import { ApiService } from './apiService.ts';
 import crypto from 'crypto';
 
 interface BotStatus {
@@ -87,7 +87,9 @@ export class TelegramBotService {
   private static lastError: string | null = null;
   private static responseTimes: number[] = [];
 
-  private static readonly BOT_TOKEN = process.env['TELEGRAM_BOT_TOKEN'];
+  private static get BOT_TOKEN() {
+    return process.env['TELEGRAM_BOT_TOKEN'];
+  }
   private static readonly WEBHOOK_URL = process.env['TELEGRAM_WEBHOOK_URL'];
   private static readonly POLLING_INTERVAL = parseInt(process.env['TELEGRAM_POLLING_INTERVAL'] || '2000');
 
@@ -301,14 +303,18 @@ export class TelegramBotService {
       }
 
       // Handle specific commands
+      console.log(`[CONSOLE DEBUG] Handling command: ${commandLower}`);
       switch (commandLower) {
         case '/start':
+          console.log(`[CONSOLE DEBUG] Executing /start command`);
           await this.handleStartCommand(chatId, userId, username, args);
           break;
         case '/help':
+          console.log(`[CONSOLE DEBUG] Executing /help command`);
           await this.handleHelpCommand(chatId, userId);
           break;
         case '/menu':
+          console.log(`[CONSOLE DEBUG] Executing /menu command`);
           await this.handleMenuCommand(chatId, userId);
           break;
         case '/topup':
@@ -368,6 +374,7 @@ export class TelegramBotService {
       }
 
       // Check if user is already registered
+      const apiService = ApiService.getInstance();
       const user = await apiService.getUserByTelegramId(userId);
       
       if (user) {
@@ -548,8 +555,14 @@ Gunakan /menu untuk memulai atau /help untuk bantuan.`;
    * Handle /menu command
    */
   private static async handleMenuCommand(chatId: number, userId: number): Promise<void> {
+    console.log(`[CONSOLE DEBUG] handleMenuCommand called for userId: ${userId}`);
+    logger.info(`[DEBUG] handleMenuCommand called for userId: ${userId}`);
     const user = await this.getRegisteredUser(userId);
+    console.log(`[CONSOLE DEBUG] getRegisteredUser returned:`, user);
+    logger.info(`[DEBUG] getRegisteredUser returned:`, user);
     if (!user) {
+      console.log(`[CONSOLE DEBUG] User not found, sending not registered message`);
+      logger.info(`[DEBUG] User not found, sending not registered message`);
       await this.sendNotRegisteredMessage(chatId);
       return;
     }
@@ -1042,8 +1055,16 @@ Lanjutkan install?`;
    */
   private static async getRegisteredUser(telegramUserId: number): Promise<any> {
     try {
-      return await apiService.getUserByTelegramId(telegramUserId);
+      console.log(`[CONSOLE DEBUG] Getting user for telegram ID: ${telegramUserId}`);
+      logger.info(`[DEBUG] Getting user for telegram ID: ${telegramUserId}`);
+      const apiService = ApiService.getInstance();
+      const user = await apiService.getUserByTelegramId(telegramUserId);
+      console.log(`[CONSOLE DEBUG] User found:`, user);
+      logger.info(`[DEBUG] User found:`, user);
+      return user;
     } catch (error: any) {
+      console.log(`[CONSOLE DEBUG] Error getting user:`, error);
+      logger.error(`[DEBUG] Error getting user:`, error);
       logger.error('Error getting registered user:', error);
       return null;
     }
@@ -1429,5 +1450,4 @@ ${status} Status: ${data.status.toUpperCase()}
   }
 }
 
-export { TelegramBotService };
 export default TelegramBotService;

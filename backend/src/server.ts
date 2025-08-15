@@ -76,7 +76,7 @@ import { connectRedis } from './config/redis.js';
 // Services and utilities
 import { emailService } from './services/emailService.js';
 import { DateUtils } from './utils/dateUtils.js';
-import { TelegramBotService } from './services/telegramBotService.js';
+// TelegramBotService will be imported dynamically after environment setup
 import { BotMonitor } from './utils/botMonitor.js';
 
 const app = express();
@@ -391,6 +391,9 @@ async function startServer() {
     // Initialize Telegram Bot Service
     try {
       if (process.env['TELEGRAM_BOT_TOKEN']) {
+        // Dynamic import to ensure environment variables are loaded
+        const { TelegramBotService } = await import('./services/telegramBotService.js');
+        
         // Check if polling mode is enabled (to avoid webhook rate limits)
         const usePolling = process.env['TELEGRAM_USE_POLLING'] === 'true';
         const result = await TelegramBotService.startBot(usePolling);
@@ -438,6 +441,7 @@ process.on('SIGTERM', async () => {
     logger.info('BOT monitoring stopped successfully');
     
     // Stop Telegram Bot
+    const { TelegramBotService } = await import('./services/telegramBotService.js');
     await TelegramBotService.stopBot();
     logger.info('Telegram Bot stopped successfully');
   } catch (error) {
@@ -455,6 +459,7 @@ process.on('SIGINT', async () => {
     logger.info('BOT monitoring stopped successfully');
     
     // Stop Telegram Bot
+    const { TelegramBotService } = await import('./services/telegramBotService.js');
     await TelegramBotService.stopBot();
     logger.info('Telegram Bot stopped successfully');
   } catch (error) {

@@ -1,4 +1,4 @@
-import { getDatabase } from '../database/init.js';
+import { getDatabase, initializeDatabase } from '../database/init.js';
 import { logger } from '../utils/logger.js';
 import { DateUtils } from '../utils/dateUtils.js';
 import { tripayService } from './tripayService.js';
@@ -16,9 +16,15 @@ export class ApiService {
     this.db = null;
   }
 
-  private initializeDb() {
+  private async initializeDb() {
     if (!this.db) {
-      this.db = getDatabase();
+      try {
+        await initializeDatabase();
+        this.db = getDatabase();
+      } catch (error) {
+        logger.error('Failed to initialize database in ApiService:', error);
+        throw error;
+      }
     }
     return this.db;
   }
@@ -35,7 +41,7 @@ export class ApiService {
    */
   async getUserByTelegramId(telegramUserId: number) {
     try {
-      const db = this.initializeDb();
+      const db = await this.initializeDb();
       const query = `
         SELECT u.*, up.first_name, up.last_name, up.phone 
         FROM users u 
@@ -55,7 +61,7 @@ export class ApiService {
    */
   async getUserQuota(userId: number): Promise<number> {
     try {
-      const db = this.initializeDb();
+      const db = await this.initializeDb();
       const query = 'SELECT quota FROM users WHERE id = ?';
       const result = await db.get(query, [userId]);
       return result?.quota || 0;
@@ -70,7 +76,7 @@ export class ApiService {
    */
   async getUserInstallations(userId: number) {
     try {
-      const db = this.initializeDb();
+      const db = await this.initializeDb();
       const query = `
         SELECT id, ip, passwd_vps, win_ver, passwd_rdp, status, start_time, created_at
         FROM install_data 
@@ -90,7 +96,7 @@ export class ApiService {
    */
   async getWindowsVersions() {
     try {
-      const db = this.initializeDb();
+      const db = await this.initializeDb();
       const query = 'SELECT * FROM windows_versions ORDER BY name';
       const versions = await db.all(query);
       return versions;
@@ -165,7 +171,7 @@ export class ApiService {
         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
       `;
       
-      const db = this.initializeDb();
+      const db = await this.initializeDb();
       const result = await db.run(query, [
         userId,
         calculation.amount,
@@ -246,7 +252,7 @@ export class ApiService {
         VALUES (?, ?, 'pending', ?, ?)
       `;
       
-      const db = this.initializeDb();
+      const db = await this.initializeDb();
       const timestamp = DateUtils.getCurrentTimestamp();
       const result = await db.run(query, [
         userId,
@@ -346,7 +352,7 @@ export class ApiService {
    */
   async getUserQuotaInfo(userId: number) {
     try {
-      const db = this.initializeDb();
+      const db = await this.initializeDb();
       
       // Get user basic info
       const user = await db.get('SELECT quota, username FROM users WHERE id = ?', [userId]);
@@ -404,7 +410,7 @@ export class ApiService {
    */
   async getTopupHistory(userId: number, limit: number = 10) {
     try {
-      const db = this.initializeDb();
+      const db = await this.initializeDb();
       const query = `
         SELECT * FROM topup_transactions 
         WHERE user_id = ? 
@@ -424,7 +430,7 @@ export class ApiService {
    */
   async updateTelegramNotifications(userId: number, enabled: boolean) {
     try {
-      const db = this.initializeDb();
+      const db = await this.initializeDb();
       const query = 'UPDATE users SET telegram_notifications = ? WHERE id = ?';
       await db.run(query, [enabled ? 1 : 0, userId]);
       return { success: true };
@@ -439,7 +445,7 @@ export class ApiService {
    */
   async getInstallationStatus(installationId: number) {
     try {
-      const db = this.initializeDb();
+      const db = await this.initializeDb();
       const query = 'SELECT * FROM install_data WHERE id = ?';
       const installation = await db.get(query, [installationId]);
       return installation;
