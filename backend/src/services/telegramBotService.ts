@@ -398,9 +398,9 @@ Akun Telegram Anda sudah terhubung dengan XME Projects.
 ✅ Status: ${user.is_verified ? 'Verified' : 'Not Verified'}
 
 Gunakan perintah berikut:
-• /install <ip> <vps_pass> <win_ver> <rdp_pass> - Install Windows
+• /install [ip] [vps_pass] [win_ver] [rdp_pass] - Install Windows
 • /myquota - Cek quota tersisa
-• /topup <qty> - Topup quota
+• /topup [qty] - Topup quota
 • /winver - Lihat versi Windows tersedia
 • /history - Riwayat instalasi
 • /help - Bantuan lengkap`;
@@ -484,9 +484,9 @@ Akun Telegram Anda (@${username}) telah berhasil terhubung dengan akun XME Proje
 💰 Quota tersisa: ${user.quota}
 
 Sekarang Anda dapat menggunakan perintah berikut:
-• /install <ip> <vps_pass> <win_ver> <rdp_pass> - Install Windows
+• /install [ip] [vps_pass] [win_ver] [rdp_pass] - Install Windows
 • /myquota - Cek quota tersisa  
-• /topup <qty> - Topup quota
+• /topup [qty] - Topup quota
 • /winver - Lihat versi Windows tersedia
 • /history - Riwayat instalasi
 • /help - Bantuan lengkap`;
@@ -500,6 +500,28 @@ Sekarang Anda dapat menggunakan perintah berikut:
         telegramUsername: username
       });
 
+      // Send real-time notification to dashboard
+      try {
+        const { NotificationService } = await import('./notificationService.js');
+        NotificationService.sendRealTimeNotification(user.id, {
+          type: 'telegram_connection_success',
+          status: 'connected',
+          message: `Telegram account @${username} connected successfully!`,
+          timestamp: new Date().toISOString(),
+          data: {
+            telegramUsername: username,
+            telegramUserId: userId
+          }
+        });
+        
+        logger.info('Telegram connection notification sent to dashboard:', {
+          userId: user.id,
+          telegramUsername: username
+        });
+      } catch (notificationError) {
+        logger.error('Failed to send telegram connection notification:', notificationError);
+      }
+
       return true;
     } catch (error: any) {
       logger.error('Error handling connection token:', error);
@@ -510,7 +532,7 @@ Sekarang Anda dapat menggunakan perintah berikut:
 
   /**
    * Handle /install command with parameters
-   * Format: /install <ip> <vps_password> <win_version> <rdp_password>
+   * Format: /install [ip] [vps_password] [win_version] [rdp_password]
    */
   private static async handleInstallCommand(chatId: number, userId: number, args: string[]): Promise<void> {
     try {
@@ -532,7 +554,7 @@ Sekarang Anda dapat menggunakan perintah berikut:
 💰 Quota tersisa: ${user.quota}
 📋 Dibutuhkan: 1 quota untuk install Windows
 
-Gunakan /topup <qty> untuk menambah quota.`);
+Gunakan /topup [qty] untuk menambah quota.`);
         return;
       }
 
@@ -541,7 +563,7 @@ Gunakan /topup <qty> untuk menambah quota.`);
         await this.sendMessage(chatId, `❌ Format perintah salah!
 
 📝 Format yang benar:
-/install <ip> <vps_password> <win_version> <rdp_password>
+/install &lt;ip&gt; &lt;vps_password&gt; &lt;win_version&gt; &lt;rdp_password&gt;
 
 📋 Contoh:
 /install 192.168.1.100 mypassword win11-pro MyRdpPass123
@@ -642,7 +664,7 @@ Lanjutkan instalasi?`;
 
 📅 Bergabung: ${new Date(user.created_at).toLocaleDateString('id-ID')}
 
-💡 Gunakan /topup <qty> untuk menambah quota
+💡 Gunakan /topup [qty] untuk menambah quota
 📋 Gunakan /install untuk memulai instalasi Windows`;
 
       await this.sendMessage(chatId, quotaMessage);
@@ -655,7 +677,7 @@ Lanjutkan instalasi?`;
 
   /**
    * Handle /topup command with quantity parameter
-   * Format: /topup <quantity>
+   * Format: /topup [quantity]
    */
   private static async handleTopupCommand(chatId: number, userId: number, args: string[]): Promise<void> {
     try {
@@ -669,7 +691,7 @@ Lanjutkan instalasi?`;
         await this.sendMessage(chatId, `💰 Topup Quota
 
 📝 Format perintah:
-/topup <quantity>
+/topup [quantity]
 
 📋 Contoh:
 /topup 5
@@ -768,7 +790,7 @@ Pilih metode pembayaran:`;
       });
 
       versionMessage += `\n💡 Gunakan slug dalam perintah install:
-/install <ip> <vps_pass> <slug> <rdp_pass>
+/install [ip] [vps_pass] [slug] [rdp_pass]
 
 📋 Contoh:
 /install 192.168.1.100 mypass win11-pro MyRdpPass123`;
@@ -845,13 +867,13 @@ Pilih metode pembayaran:`;
 • /start - Mulai menggunakan bot atau hubungkan akun
 
 🖥️ Instalasi:
-• /install <ip> <vps_pass> <win_ver> <rdp_pass> - Install Windows
+• /install [ip] [vps_pass] [win_ver] [rdp_pass] - Install Windows
 • /winver - Lihat versi Windows tersedia
 • /history - Riwayat instalasi
 
 💰 Quota & Topup:
 • /myquota - Cek quota tersisa
-• /topup <qty> - Topup quota
+• /topup [qty] - Topup quota
 
 🛠️ Lainnya:
 • /help - Bantuan ini
@@ -1695,9 +1717,9 @@ ${status} Status: ${data.status.toUpperCase()}
 
       const commands = [
         { command: 'start', description: 'Mulai menggunakan bot atau hubungkan akun' },
-        { command: 'install', description: 'Install Windows: /install <ip> <vps_pass> <win_ver> <rdp_pass>' },
+        { command: 'install', description: 'Install Windows: /install [ip] [vps_pass] [win_ver] [rdp_pass]' },
         { command: 'myquota', description: 'Cek quota tersisa' },
-        { command: 'topup', description: 'Topup quota: /topup <quantity>' },
+        { command: 'topup', description: 'Topup quota: /topup [quantity]' },
         { command: 'winver', description: 'Lihat versi Windows tersedia' },
         { command: 'history', description: 'Riwayat instalasi' },
         { command: 'help', description: 'Bantuan penggunaan lengkap' },

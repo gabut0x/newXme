@@ -316,7 +316,11 @@ class ApiService {
 
   async logout(): Promise<AxiosResponse<ApiResponse>> {
     try {
-      const response = await this.api.post('/auth/logout');
+      const response = await this.api.post('/auth/logout', {}, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
       localStorage.removeItem('accessToken');
       return response;
     } catch (error) {

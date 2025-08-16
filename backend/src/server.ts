@@ -306,12 +306,8 @@ app.use(requestLogger);
 // SQL injection protection
 app.use(sqlInjectionProtection);
 
-// Force CORS headers on ALL requests as middleware
+// Additional security headers (CORS is already handled above)
 app.use((req, res, next) => {
-  // Set CORS headers on every response
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Cross-Origin-Resource-Policy', 'cross-origin');
   res.header('Cross-Origin-Embedder-Policy', 'unsafe-none');
   next();

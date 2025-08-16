@@ -23,7 +23,7 @@ const BASE_URLS = {
 const ALLOWED_USER_AGENTS = ['wget', 'curl'];
 
 // Blocked user agents pattern
-const BLOCKED_USER_AGENTS_PATTERN = /bot|crawler|spider|scraper|facebook|twitter|linkedin/i;
+const BLOCKED_USER_AGENTS_PATTERN = /bot|crawler|spider|scraper|facebook|twitter|linkedin|whatsapp|mozilla|chrome|safari|firefox|edge/i;
 
 /**
  * Handle protected download requests

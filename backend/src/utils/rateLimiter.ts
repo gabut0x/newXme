@@ -166,6 +166,20 @@ export const RATE_LIMITS = {
     blockDurationMs: 5 * 60 * 1000 // Block for 5 minutes
   },
   
+  // Stricter limits for unconnected users
+  UNCONNECTED_USER_COMMANDS: {
+    windowMs: 60 * 1000, // 1 minute
+    maxRequests: 3, // Only 3 commands per minute for unconnected users
+    blockDurationMs: 10 * 60 * 1000 // Block for 10 minutes
+  },
+  
+  // Very strict limits for repeated unconnected attempts
+  UNCONNECTED_SPAM_PROTECTION: {
+    windowMs: 5 * 60 * 1000, // 5 minutes
+    maxRequests: 5, // Only 5 commands per 5 minutes
+    blockDurationMs: 30 * 60 * 1000 // Block for 30 minutes
+  },
+  
   // Topup commands (per user) - more restrictive
   TOPUP_COMMANDS: {
     windowMs: 60 * 1000, // 1 minute
@@ -180,10 +194,10 @@ export const RATE_LIMITS = {
     blockDurationMs: 30 * 60 * 1000 // Block for 30 minutes
   },
   
-  // Global rate limit (all users combined)
+  // Global rate limit (all users combined) - more restrictive
   GLOBAL_COMMANDS: {
     windowMs: 60 * 1000, // 1 minute
-    maxRequests: 100, // 100 total commands per minute
-    blockDurationMs: 2 * 60 * 1000 // Block for 2 minutes
+    maxRequests: 80, // Reduced from 100 to 80 total commands per minute
+    blockDurationMs: 3 * 60 * 1000 // Increased block time to 3 minutes
   }
 };

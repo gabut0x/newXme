@@ -1801,6 +1801,24 @@ export default function AdminDashboardPage() {
                           <span className="text-sm">Bot token not configured or invalid</span>
                         </div>
                       )}
+                      {/* Bot Link - Show regardless of mode */}
+                      {telegramStatus.botInfo?.username && (
+                        <div className="p-4 bg-green-50 dark:bg-green-950/20 rounded-lg mt-4">
+                          <h4 className="font-medium text-green-900 dark:text-green-100 mb-2">
+                            Bot Link
+                          </h4>
+                          <p className="text-sm text-green-800 dark:text-green-200">
+                            <a
+                              href={`https://t.me/${telegramStatus.botInfo.username}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline"
+                            >
+                              https://t.me/{telegramStatus.botInfo.username}
+                            </a>
+                          </p>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -1901,25 +1919,6 @@ export default function AdminDashboardPage() {
                     </CardContent>
                   </Card>
                 </div>
-
-                {/* Bot Link - Show regardless of mode */}
-                {telegramStatus.botInfo?.username && (
-                  <div className="p-4 bg-green-50 dark:bg-green-950/20 rounded-lg">
-                    <h4 className="font-medium text-green-900 dark:text-green-100 mb-2">
-                      Bot Link
-                    </h4>
-                    <p className="text-sm text-green-800 dark:text-green-200">
-                      <a
-                        href={`https://t.me/${telegramStatus.botInfo.username}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline"
-                      >
-                        https://t.me/{telegramStatus.botInfo.username}
-                      </a>
-                    </p>
-                  </div>
-                )}
               </div>
             )}
           </div>

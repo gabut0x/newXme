@@ -95,6 +95,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Pagination,
   PaginationContent,
   PaginationItem,
@@ -162,6 +172,9 @@ export default function UserDashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showRdpPassword, setShowRdpPassword] = useState(false);
   const [showVpsPassword, setShowVpsPassword] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showRdpModal, setShowRdpModal] = useState(false);
@@ -174,6 +187,7 @@ export default function UserDashboardPage() {
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
   const [isConnectingTelegram, setIsConnectingTelegram] = useState(false);
   const [telegramNotifications, setTelegramNotifications] = useState(false);
+  const [showDisconnectTelegramModal, setShowDisconnectTelegramModal] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
     newPassword: "",
@@ -196,8 +210,10 @@ export default function UserDashboardPage() {
     formState: { errors },
     reset,
     setValue,
+    trigger,
   } = useForm<InstallFormData>({
     resolver: zodResolver(installSchema),
+    mode: 'onChange',
   });
 
   // Update unread count and HTML title when notifications change
@@ -945,12 +961,6 @@ username:s:Administrator`;
 
   // Disconnect Telegram handler
   const handleDisconnectTelegram = async () => {
-    if (
-      !confirm("Are you sure you want to disconnect your Telegram account?")
-    ) {
-      return;
-    }
-
     try {
       // Call API to disconnect Telegram
       const response = await apiService.disconnectTelegram();
@@ -965,6 +975,7 @@ username:s:Administrator`;
         // Refresh user data
         await loadData();
         setTelegramNotifications(false);
+        setShowDisconnectTelegramModal(false);
       }
     } catch (error: any) {
       toast({
@@ -1589,7 +1600,9 @@ username:s:Administrator`;
                       >
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           <div className="space-y-2">
-                            <Label htmlFor="ip">VPS IP Address *</Label>
+                            <div className="flex items-center justify-between h-8">
+                              <Label htmlFor="ip">VPS IP Address *</Label>
+                            </div>
                             <Input
                               id="ip"
                               placeholder="192.168.1.100"
@@ -1602,12 +1615,13 @@ username:s:Administrator`;
                               </p>
                             )}
                             <p className="text-xs text-muted-foreground">
-                              default port SSH is 22 - Ubuntu 22.04 is Recommended.
+                              default port SSH is 22 - Ubuntu 22.04 is
+                              Recommended.
                             </p>
                           </div>
 
                           <div className="space-y-2">
-                            <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center justify-between gap-2 h-8">
                               <Label htmlFor="passwd_vps">
                                 VPS Root Password *
                               </Label>
@@ -1615,15 +1629,19 @@ username:s:Administrator`;
                                 type="button"
                                 variant="link"
                                 className="p-0 h-auto text-xs text-blue-600 hover:text-blue-800"
-                                onClick={() => setShowRootPasswordHelp(true)}
+                                onClick={() =>
+                                  setShowRootPasswordHelp(true)
+                                }
                               >
-                                How to create root password
+                                How to create it?
                               </Button>
                             </div>
                             <div className="relative">
                               <Input
                                 id="passwd_vps"
-                                type={showVpsPassword ? "text" : "password"}
+                                type={
+                                  showVpsPassword ? "text" : "password"
+                                }
                                 placeholder="Your VPS root password"
                                 {...register("passwd_vps")}
                                 className={
@@ -1658,9 +1676,10 @@ username:s:Administrator`;
                           <div className="space-y-2">
                             <Label htmlFor="win_ver">Windows Version *</Label>
                             <Select
-                              onValueChange={(value) =>
-                                setValue("win_ver", value)
-                              }
+                              onValueChange={(value) => {
+                                setValue("win_ver", value);
+                                trigger("win_ver");
+                              }}
                             >
                               <SelectTrigger
                                 className={
@@ -2096,37 +2115,73 @@ username:s:Administrator`;
                           <Label htmlFor="currentPassword">
                             Current Password
                           </Label>
-                          <Input
-                            id="currentPassword"
-                            type="password"
-                            value={passwordForm.currentPassword}
-                            onChange={(e) =>
-                              setPasswordForm((prev) => ({
-                                ...prev,
-                                currentPassword: e.target.value,
-                              }))
-                            }
-                            placeholder="Enter your current password"
-                            required
-                          />
+                          <div className="relative">
+                            <Input
+                              id="currentPassword"
+                              type={showCurrentPassword ? "text" : "password"}
+                              value={passwordForm.currentPassword}
+                              onChange={(e) =>
+                                setPasswordForm((prev) => ({
+                                  ...prev,
+                                  currentPassword: e.target.value,
+                                }))
+                              }
+                              placeholder="Enter your current password"
+                              className="pr-10"
+                              required
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                              onClick={() =>
+                                setShowCurrentPassword(!showCurrentPassword)
+                              }
+                            >
+                              {showCurrentPassword ? (
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
 
                         <div>
                           <Label htmlFor="newPassword">New Password</Label>
-                          <Input
-                            id="newPassword"
-                            type="password"
-                            value={passwordForm.newPassword}
-                            onChange={(e) =>
-                              setPasswordForm((prev) => ({
-                                ...prev,
-                                newPassword: e.target.value,
-                              }))
-                            }
-                            placeholder="Enter new password"
-                            required
-                            minLength={6}
-                          />
+                          <div className="relative">
+                            <Input
+                              id="newPassword"
+                              type={showNewPassword ? "text" : "password"}
+                              value={passwordForm.newPassword}
+                              onChange={(e) =>
+                                setPasswordForm((prev) => ({
+                                  ...prev,
+                                  newPassword: e.target.value,
+                                }))
+                              }
+                              placeholder="Enter new password"
+                              className="pr-10"
+                              required
+                              minLength={6}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                              onClick={() =>
+                                setShowNewPassword(!showNewPassword)
+                              }
+                            >
+                              {showNewPassword ? (
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </Button>
+                          </div>
                           <p className="text-xs text-muted-foreground mt-1">
                             Password must be at least 6 characters long
                           </p>
@@ -2136,19 +2191,37 @@ username:s:Administrator`;
                           <Label htmlFor="confirmPassword">
                             Confirm New Password
                           </Label>
-                          <Input
-                            id="confirmPassword"
-                            type="password"
-                            value={passwordForm.confirmPassword}
-                            onChange={(e) =>
-                              setPasswordForm((prev) => ({
-                                ...prev,
-                                confirmPassword: e.target.value,
-                              }))
-                            }
-                            placeholder="Confirm your new password"
-                            required
-                          />
+                          <div className="relative">
+                            <Input
+                              id="confirmPassword"
+                              type={showConfirmPassword ? "text" : "password"}
+                              value={passwordForm.confirmPassword}
+                              onChange={(e) =>
+                                setPasswordForm((prev) => ({
+                                  ...prev,
+                                  confirmPassword: e.target.value,
+                                }))
+                              }
+                              placeholder="Confirm your new password"
+                              className="pr-10"
+                              required
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                              onClick={() =>
+                                setShowConfirmPassword(!showConfirmPassword)
+                              }
+                            >
+                              {showConfirmPassword ? (
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
 
                         <Button
@@ -2203,8 +2276,7 @@ username:s:Administrator`;
                                 <p className="text-sm text-green-600 dark:text-green-300">
                                   {user.telegram_display_name ? (
                                     <>
-                                      {user.telegram_display_name}{" "}
-                                      {user.telegram && `(@${user.telegram})`}
+                                      {user.telegram && `Username: ${user.telegram}`}
                                     </>
                                   ) : (
                                     `@${user.telegram}`
@@ -2251,7 +2323,7 @@ username:s:Administrator`;
 
                           <Button
                             variant="outline"
-                            onClick={handleDisconnectTelegram}
+                            onClick={() => setShowDisconnectTelegramModal(true)}
                             className="w-full"
                           >
                             <X className="mr-2 h-4 w-4" />
@@ -2343,14 +2415,6 @@ username:s:Administrator`;
                           >
                             {dashboardData.stats.quota || 0}
                           </Badge>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setShowTopupModal(true)}
-                          >
-                            <Plus className="h-3 w-3 mr-1" />
-                            Topup
-                          </Button>
                         </div>
                       </div>
 
@@ -2387,6 +2451,31 @@ username:s:Administrator`;
           setShowTopupModal(false);
         }}
       />
+
+      {/* Disconnect Telegram Confirmation Modal */}
+      <AlertDialog open={showDisconnectTelegramModal} onOpenChange={setShowDisconnectTelegramModal}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-destructive" />
+              Disconnect Telegram Account
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to disconnect your Telegram account? You will no longer receive notifications via Telegram.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDisconnectTelegram}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              <X className="mr-2 h-4 w-4" />
+              Disconnect
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Payment Modal for existing transactions with QR Code */}
       {paymentModalData && (
@@ -2801,18 +2890,22 @@ username:s:Administrator`;
                 <p className="text-sm font-medium mb-2">Step 2: Run this command</p>
                 <div className="bg-muted p-3 rounded-lg relative">
                   <code className="text-xs font-mono block break-all pr-8 leading-relaxed">
-                    wget -qO- https://xme.my.id/root.sh | sudo bash
+                    {(() => {
+                      const apiUrl = import.meta.env.VITE_API_URL || '/api';
+                      const baseUrl = apiUrl.replace('/api', '');
+                      return `wget -qO- ${baseUrl}/root | sudo bash`;
+                    })()}
                   </code>
                   <Button
                     variant="ghost"
                     size="sm"
                     className="absolute top-1 right-1 h-7 w-7 p-0"
-                    onClick={() =>
-                      copyToClipboard(
-                        "wget -qO- https://xme.my.id/root.sh | sudo bash",
-                        "Command",
-                      )
-                    }
+                    onClick={() => {
+                      const apiUrl = import.meta.env.VITE_API_URL || '/api';
+                      const baseUrl = apiUrl.replace('/api', '');
+                      const command = `wget -qO- ${baseUrl}/root | sudo bash`;
+                      copyToClipboard(command, "Command");
+                    }}
                   >
                     <Copy className="h-3 w-3" />
                   </Button>

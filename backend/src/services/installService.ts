@@ -777,8 +777,8 @@ export class InstallService {
         }
         // For running status - periodic RDP checking and timeout management
         else if (install.status === 'running') {
-          // Start RDP checking after 3 minutes from when status became 'running'
-          if (minutesSinceUpdate >= 3) {
+          // Start RDP checking after 4 minutes from when status became 'running'
+          if (minutesSinceUpdate >= 4) {
             // Check RDP connectivity
             const isWindowsReady = await this.checkWindowsRDP(ip);
             
@@ -866,11 +866,11 @@ export class InstallService {
         });
         
         // Resume monitoring based on current status and elapsed time
-        if (install.status === 'pending') {
+        if (install.status === 'pending' || install.status === 'preparing') {
           // If pending for more than 3 minutes, mark as failed
           if (minutesSinceCreated >= 3) {
             await this.updateInstallStatus(install.id, 'failed', 'Installation failed to start within expected time (detected during server restart recovery)');
-            logger.info(`Marked install ${install.id} as failed (pending > 3 minutes)`);
+            logger.info(`Marked install ${install.id} as failed (pending or preparing > 3 minutes)`);
           } else {
             // Resume monitoring with adjusted timeout
             const remainingTime = (3 * 60 * 1000) - (now - createdTime);
@@ -923,7 +923,7 @@ export class InstallService {
       const db = getDatabase();
       const installs = await db.all(
         'SELECT * FROM install_data WHERE status IN (?, ?, ?) ORDER BY created_at ASC',
-        ['pending', 'running', 'manual_review']
+        ['pending', 'running', 'preparing']
       );
       
       return installs || [];
