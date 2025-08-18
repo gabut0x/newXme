@@ -19,6 +19,8 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
   notifications: DashboardNotification[];
+  twoFactorRequired: boolean;
+  twoFactorChallengeId: string | null;
 }
 
 // Auth actions
@@ -30,13 +32,15 @@ type AuthAction =
   | { type: 'UPDATE_USER'; payload: User }
   | { type: 'CLEAR_ERROR' }
   | { type: 'ADD_NOTIFICATION'; payload: DashboardNotification }
-  | { type: 'CLEAR_NOTIFICATIONS' };
+  | { type: 'CLEAR_NOTIFICATIONS' }
+  | { type: 'AUTH_2FA_REQUIRED'; payload: string }
+  | { type: 'AUTH_2FA_CLEAR' };
 
 // Auth context interface
 interface AuthContextType {
   state: AuthState;
   notifications: DashboardNotification[];
-  login: (username: string, password: string, recaptchaToken: string) => Promise<void>;
+  login: (username: string, password: string, recaptchaToken: string) => Promise<{ twoFactorRequired: boolean }>;
   register: (username: string, email: string, password: string, confirmPassword: string, recaptchaToken: string) => Promise<void>;
   logout: () => Promise<void>;
   verifyEmail: (code: string) => Promise<void>;
@@ -44,6 +48,8 @@ interface AuthContextType {
   forgotPassword: (email: string, recaptchaToken: string) => Promise<void>;
   resetPassword: (token: string, newPassword: string, confirmPassword: string) => Promise<void>;
   updateProfile: (data: any) => Promise<void>;
+  verifyTwoFactor: (code: string) => Promise<void>;
+  clearTwoFactor: () => void;
   clearError: () => void;
   checkAuth: () => Promise<void>;
   addNotification: (notification: DashboardNotification) => void;
@@ -57,6 +63,8 @@ const initialState: AuthState = {
   isLoading: true,
   error: null,
   notifications: [],
+  twoFactorRequired: false,
+  twoFactorChallengeId: null,
 };
 
 // Auth reducer
@@ -75,6 +83,8 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         isAuthenticated: true,
         isLoading: false,
         error: null,
+        twoFactorRequired: false,
+        twoFactorChallengeId: null,
       };
     case 'AUTH_FAILURE':
       return {
@@ -91,6 +101,8 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         isAuthenticated: false,
         isLoading: false,
         error: null,
+        twoFactorRequired: false,
+        twoFactorChallengeId: null,
       };
     case 'UPDATE_USER':
       return {
@@ -111,6 +123,20 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
       return {
         ...state,
         notifications: [],
+      };
+    case 'AUTH_2FA_REQUIRED':
+      return {
+        ...state,
+        isLoading: false,
+        twoFactorRequired: true,
+        twoFactorChallengeId: action.payload,
+      };
+    case 'AUTH_2FA_CLEAR':
+      return {
+        ...state,
+        twoFactorRequired: false,
+        twoFactorChallengeId: null,
+        error: null,
       };
     default:
       return state;
@@ -159,10 +185,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       dispatch({ type: 'AUTH_START' });
       
       const response = await apiService.login({ username, password, recaptchaToken });
-      if (response.data.data?.user && response.data.data?.accessToken) {
-        const { user, accessToken } = response.data.data;
+      const data = response.data.data as any;
+      
+      if (data?.twoFactorRequired && data?.challengeId) {
+        dispatch({ type: 'AUTH_2FA_REQUIRED', payload: data.challengeId });
+        return { twoFactorRequired: true };
+      }
+
+      if (data?.user && data?.accessToken) {
+        const { user, accessToken } = data;
         apiService.setAuthToken(accessToken);
         dispatch({ type: 'AUTH_SUCCESS', payload: user });
+        return { twoFactorRequired: false };
       } else {
         throw new Error('Invalid response from server');
       }
@@ -172,6 +206,29 @@ export function AuthProvider({ children }: AuthProviderProps) {
       throw new Error(message);
     }
   }, []);
+
+  // Verify 2FA function
+  const verifyTwoFactor = useCallback(async (code: string) => {
+    if (!state.twoFactorChallengeId) {
+      throw new Error('No active 2FA challenge');
+    }
+    try {
+      dispatch({ type: 'AUTH_START' });
+      const response = await apiService.verify2FA({ challengeId: state.twoFactorChallengeId, code });
+      const data = response.data.data as any;
+      if (data?.user && data?.accessToken) {
+        const { user, accessToken } = data;
+        apiService.setAuthToken(accessToken);
+        dispatch({ type: 'AUTH_SUCCESS', payload: user });
+      } else {
+        throw new Error('Invalid response from server');
+      }
+    } catch (error: any) {
+      const message = error.response?.data?.message || '2FA verification failed';
+      dispatch({ type: 'AUTH_FAILURE', payload: message });
+      throw new Error(message);
+    }
+  }, [state.twoFactorChallengeId]);
 
   // Register function
   const register = useCallback(async (username: string, email: string, password: string, confirmPassword: string, recaptchaToken: string) => {
@@ -273,6 +330,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     dispatch({ type: 'CLEAR_ERROR' });
   }, []);
 
+  const clearTwoFactor = useCallback(() => {
+    dispatch({ type: 'AUTH_2FA_CLEAR' });
+  }, []);
+
   // Add notification function
   const addNotification = useCallback((notification: DashboardNotification) => {
     dispatch({ type: 'ADD_NOTIFICATION', payload: notification });
@@ -301,6 +362,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     forgotPassword,
     resetPassword,
     updateProfile,
+    verifyTwoFactor,
+    clearTwoFactor,
     clearError,
     checkAuth,
     addNotification,

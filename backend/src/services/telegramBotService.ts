@@ -584,35 +584,30 @@ Gunakan /topup [qty] untuk menambah quota.`);
         return;
       }
 
-      // Show confirmation
-      const confirmMessage = `🖥️ Konfirmasi Install Windows
+      // Eksekusi langsung tanpa konfirmasi
+      await this.sendMessage(chatId, '🔄 Memulai instalasi Windows...\n\nProses ini akan memakan waktu beberapa menit. Anda akan mendapat notifikasi ketika instalasi selesai.');
 
-📋 Detail Instalasi:
-• IP VPS: ${ip}
-• Versi Windows: ${winVersion}
-• Quota akan digunakan: 1
-• Sisa quota setelah install: ${user.quota - 1}
+      const result = await InstallService.processInstallation(
+        user.id,
+        ip,
+        vpsPassword,
+        winVersion,
+        rdpPassword
+      );
 
-⚠️ Pastikan VPS Anda:
-• Sudah online dan dapat diakses
-• Menggunakan Ubuntu 20/22 atau Debian 12
-• Memiliki akses root dengan password yang benar
-• Memiliki koneksi internet yang stabil
+      if (result.success) {
+        await this.sendMessage(chatId, `✅ ${result.message}
 
-Lanjutkan instalasi?`;
+📋 Detail:
+• IP: ${ip}
+• Windows: ${winVersion}
+• Install ID: ${result.installId}
 
-      await this.sendMessage(chatId, confirmMessage, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '✅ Ya, Install Sekarang', callback_data: `confirm_install_${ip}_${vpsPassword}_${winVersion}_${rdpPassword}` }
-            ],
-            [
-              { text: '❌ Batal', callback_data: 'cancel_install' }
-            ]
-          ]
-        }
-      });
+⏰ Estimasi waktu: 5-15 menit
+🔔 Anda akan mendapat notifikasi otomatis ketika instalasi selesai.`);
+      } else {
+        await this.sendMessage(chatId, `❌ Instalasi gagal: ${result.message}`);
+      }
 
     } catch (error: any) {
       logger.error('Error in install command:', error);
@@ -1114,6 +1109,26 @@ Saya tidak mengerti pesan tersebut. Gunakan perintah berikut:
   }
 
   /**
+   * Get user by user ID (for notifications)
+   */
+  private static async getUserById(userId: number): Promise<ConnectedUser | null> {
+    try {
+      const db = getDatabase();
+      const user = await db.get(`
+        SELECT u.id, u.username, u.email, u.quota, u.telegram_user_id, u.telegram_display_name, 
+               u.telegram_notifications, u.is_verified, u.is_active, u.created_at
+        FROM users u 
+        WHERE u.id = ? AND u.is_active = 1
+      `, [userId]);
+
+      return user || null;
+    } catch (error: any) {
+      logger.error('Error getting user by ID:', error);
+      return null;
+    }
+  }
+
+  /**
    * Send not connected message
    */
   private static async sendNotConnectedMessage(chatId: number): Promise<void> {
@@ -1512,25 +1527,63 @@ Jika belum punya akun, daftar dulu di website kami.
     ip: string;
     winVersion: string;
     message: string;
+    installId?: number;
   }): Promise<boolean> {
     try {
-      const user = await this.getConnectedUser(userId);
-      if (!user || !user.telegram_notifications) {
-        return false; // User not connected or notifications disabled
+      const user = await this.getUserById(userId);
+      if (!user || !user.telegram_notifications || !user.telegram_user_id) {
+        logger.debug('Skipping Telegram notification:', {
+          userId,
+          userFound: !!user,
+          telegramNotifications: user?.telegram_notifications,
+          telegramUserId: user?.telegram_user_id
+        });
+        return false; // User not found, notifications disabled, or no telegram connection
       }
 
       const status = this.getStatusEmoji(data.status);
-      const message = `🖥️ Update Install Windows
+      
+      // Get Windows version name from database
+      const db = getDatabase();
+      const windowsVersion = await db.get('SELECT name FROM windows_versions WHERE slug = ?', [data.winVersion]);
+      const windowsVersionName = windowsVersion ? windowsVersion.name : data.winVersion;
+      
+      // Get RDP password from install data if status is completed
+      let rdpPassword = '';
+      if (data.status === 'completed' && data.installId) {
+        const installData = await db.get('SELECT passwd_rdp FROM install_data WHERE id = ?', [data.installId]);
+        rdpPassword = installData ? installData.passwd_rdp : '';
+      }
+      
+      let message = `🖥️ Update Install Windows
 
 ${status} Status: ${data.status.toUpperCase()}
-🌐 IP: ${data.ip}
-💿 Versi: ${data.winVersion}
+
+🌐 IP: <code>${data.ip}:22</code>`;
+      
+      // Add RDP password if installation is completed
+      if (data.status === 'completed' && rdpPassword) {
+        message += `
+👤 Username: <code>Administrator</code>
+🔐 Password RDP: <code>${rdpPassword}</code>
+💿 Versi: ${windowsVersionName}`;
+      }
+      
+      message += `
 
 📝 ${data.message}
 
 ⏰ ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`;
 
-      await this.sendMessage(user.telegram_user_id, message);
+      await this.sendMessage(user.telegram_user_id, message, { parse_mode: 'HTML' });
+      logger.info('Telegram installation notification sent successfully:', {
+        userId,
+        telegramUserId: user.telegram_user_id,
+        status: data.status,
+        ip: data.ip,
+        windowsVersionName,
+        hasRdpPassword: !!rdpPassword
+      });
       return true;
     } catch (error: any) {
       logger.error('Error sending installation notification:', error);

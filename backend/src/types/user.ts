@@ -61,6 +61,24 @@ export const updateProfileSchema = z.object({
   language: z.string().max(10, 'Language code must be less than 10 characters').optional(),
 });
 
+// 2FA validation schemas
+export const verify2FASchema = z.object({
+  challengeId: z.string().min(1, 'Challenge ID is required'),
+  code: z.string().length(6, 'Code must be 6 digits').regex(/^\d{6}$/, 'Code must contain only numbers'),
+});
+
+export const enable2FASchema = z.object({
+  code: z.string().length(6, 'Code must be 6 digits').regex(/^\d{6}$/, 'Code must contain only numbers'),
+  secret: z.string()
+    .min(16, 'Secret is required')
+    .max(128, 'Secret is too long')
+    .regex(/^[A-Z2-7]+=*$/i, 'Invalid secret format'),
+});
+
+export const disable2FASchema = z.object({
+  code: z.string().length(6, 'Code must be 6 digits').regex(/^\d{6}$/, 'Code must contain only numbers'),
+});
+
 // Windows Version validation schemas
 export const windowsVersionSchema = z.object({
   name: z.string().min(1, 'Name is required').max(255, 'Name must be less than 255 characters'),
@@ -99,20 +117,21 @@ export const installDataSchema = z.object({
 
 // User interfaces
 export interface User {
-  id: number;
-  username: string;
-  email: string;
-  password_hash: string;
-  is_verified: boolean;
-  is_active: boolean;
-  admin: number;
-  telegram?: string;
-  quota: number;
-  created_at: string;
-  updated_at: string;
-  last_login?: string;
-  failed_login_attempts: number;
-  locked_until?: string;
+  id: number
+  username: string
+  email: string
+  password_hash: string
+  is_admin: boolean
+  is_active: boolean
+  quota: number | null
+  telegram_notifications: boolean | null
+  telegram_user_id: string | null
+  telegram_display_name: string | null
+  created_at: string
+  updated_at: string
+  // 2FA fields
+  two_factor_enabled: boolean | 0 | 1 | null
+  totp_secret: string | null
 }
 
 export interface UserProfile {
@@ -163,16 +182,17 @@ export interface AuditLog {
 
 // Public user interface (without sensitive data)
 export interface PublicUser {
-  id: number;
-  username: string;
-  email: string;
-  is_verified: boolean;
-  admin: number;
-  telegram?: string;
-  quota: number;
-  created_at: string;
-  last_login?: string;
-  profile?: Omit<UserProfile, 'user_id'>;
+  id: number
+  username: string
+  email: string
+  is_admin: boolean
+  is_active: boolean
+  quota: number | null
+  telegram_notifications: boolean | null
+  telegram_user_id: string | null
+  telegram_display_name: string | null
+  // 2FA safe exposure
+  two_factor_enabled?: boolean | 0 | 1 | null
 }
 
 // Windows Version interface
@@ -237,4 +257,11 @@ export interface PaginatedResponse<T> {
     total: number;
     totalPages: number;
   };
+}
+
+export type TwoFASetupResponse = {
+  secret: string
+  otpauth: string
+  qrSvg: string
+  qrBase64?: string
 }

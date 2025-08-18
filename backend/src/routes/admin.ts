@@ -25,6 +25,9 @@ import { auditLogger } from '../middleware/security.js';
 
 // Types and schemas
 import { windowsVersionSchema, productSchema } from '../types/user.js';
+import { enable2FASchema, disable2FASchema } from '../types/user.js';
+import { authenticator } from 'otplib';
+import QRCode from 'qrcode';
 
 // Services and utilities
 import { tripayService } from '../services/tripayService.js';
@@ -48,24 +51,25 @@ router.use(sqlInjectionProtection);
 router.get('/windows-versions', 
   auditLogger('ADMIN_GET_WINDOWS_VERSIONS'),
   asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const db = getDatabase();
-    const versions = await db.all('SELECT * FROM windows_versions ORDER BY created_at DESC');
-    
-    res.json({
-      success: true,
-      message: 'Windows versions retrieved successfully',
-      data: versions
-    });
-  } catch (error) {
-    logger.error('Error fetching windows versions:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch windows versions',
-      error: 'Internal server error'
-    });
-  }
-}));
+    try {
+      const db = getDatabase();
+      const versions = await db.all('SELECT * FROM windows_versions ORDER BY created_at DESC');
+      
+      res.json({
+        success: true,
+        message: 'Windows versions retrieved successfully',
+        data: versions
+      });
+    } catch (error) {
+      logger.error('Error fetching windows versions:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch windows versions',
+        error: 'Internal server error'
+      });
+    }
+  })
+);
 
 router.post('/windows-versions', 
   validateRequest(windowsVersionSchema),
@@ -1113,13 +1117,15 @@ router.get('/telegram-bot/metrics',
       
       res.json({
         success: true,
+        message: 'Bot metrics retrieved successfully',
         data: metrics
       });
     } catch (error) {
       logger.error('Error getting bot metrics:', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to get bot metrics'
+        message: 'Failed to get bot metrics',
+        error: 'INTERNAL_ERROR'
       });
     }
   })
@@ -1420,6 +1426,546 @@ router.post('/telegram-bot/rate-limiter/unblock',
         success: false,
         message: 'Failed to unblock rate limit',
         error: 'Internal server error'
+      });
+    }
+  })
+);
+
+// Admin 2FA management routes
+router.get('/2fa/status', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const db = getDatabase();
+  const user = await db.get('SELECT id, two_factor_enabled, totp_secret, email, username FROM users WHERE id = ?', [req.user!.id]);
+  res.json({
+    success: true,
+    data: {
+      enabled: !!(user?.two_factor_enabled === 1 || user?.two_factor_enabled === true),
+      hasSecret: !!user?.totp_secret
+    }
+  });
+}));
+
+router.post('/2fa/setup', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const db = getDatabase();
+  const user = await db.get('SELECT id, email, username FROM users WHERE id = ?', [req.user!.id]);
+  const secret = authenticator.generateSecret();
+  const label = `${user.username} (${user.email})`;
+  const issuer = process.env['APP_NAME'] || 'NewXme';
+  const otpauth = authenticator.keyuri(user.email || user.username, issuer, secret);
+  
+  // Generate base64 PNG QR code (more reliable than SVG)
+  const qrPngBuffer = await QRCode.toBuffer(otpauth, { 
+    type: 'png', 
+    width: 256,
+    margin: 2,
+    color: {
+      dark: '#000000',
+      light: '#FFFFFF'
+    }
+  });
+  const qrBase64 = `data:image/png;base64,${qrPngBuffer.toString('base64')}`;
+  
+  // Also generate SVG as fallback (with better sanitization)
+  let qrSvg = await QRCode.toString(otpauth, { type: 'svg', width: 256, margin: 2 });
+  
+  // Improved SVG sanitization
+  qrSvg = qrSvg
+    .replace(/`/g, '') // Remove all backticks
+    .replace(/xmlns="\s*([^"]*?)\s*"/g, 'xmlns="$1"') // Clean xmlns attribute
+    .replace(/<svg\b(?![^>]*xmlns)/, '<svg xmlns="http://www.w3.org/2000/svg"'); // Ensure xmlns exists
+
+  // Do not persist secret until verified; return for client to verify
+  res.json({
+    success: true,
+    message: '2FA setup initiated',
+    data: {
+      secret,
+      otpauth,
+      qrSvg,
+      qrBase64 // Add base64 PNG as primary option
+    }
+  });
+}));
+
+router.post('/2fa/enable', validateRequest(enable2FASchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { code, secret } = req.body;
+  // Verify TOTP code with provided secret
+  const isValid = authenticator.verify({ token: code, secret });
+  if (!isValid) {
+    return res.status(400).json({ success: false, message: 'Invalid 2FA code' });
+  }
+  const db = getDatabase();
+  await db.run('UPDATE users SET two_factor_enabled = 1, totp_secret = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [secret, req.user!.id]);
+  res.json({ success: true, message: '2FA enabled successfully' });
+}));
+
+router.post('/2fa/disable', validateRequest(disable2FASchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { code } = req.body;
+  const db = getDatabase();
+  const user = await db.get('SELECT totp_secret FROM users WHERE id = ?', [req.user!.id]);
+  if (!user?.totp_secret) {
+    return res.status(400).json({ success: false, message: '2FA not enabled' });
+  }
+  const isValid = authenticator.verify({ token: code, secret: user.totp_secret });
+  if (!isValid) {
+    return res.status(400).json({ success: false, message: 'Invalid 2FA code' });
+  }
+  await db.run('UPDATE users SET two_factor_enabled = 0, totp_secret = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [req.user!.id]);
+  res.json({ success: true, message: '2FA disabled successfully' });
+}));
+
+// Quota Management Routes for Admins
+router.post('/users/:id/quota', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { amount, operation } = req.body; // operation can be 'add' or 'set'
+    const db = getDatabase();
+    
+    // Validate input
+    if (!amount || isNaN(amount) || amount < 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid amount',
+        error: 'Amount must be a non-negative number'
+      });
+      return;
+    }
+    
+    if (!operation || !['add', 'set'].includes(operation)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid operation',
+        error: 'Operation must be either "add" or "set"'
+      });
+      return;
+    }
+    
+    // Check if user exists
+    const user = await db.get('SELECT id, quota FROM users WHERE id = ?', [id]);
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        message: 'User not found',
+        error: 'User does not exist'
+      });
+      return;
+    }
+    
+    let newQuota;
+    if (operation === 'add') {
+      newQuota = user.quota + amount;
+    } else { // operation === 'set'
+      newQuota = amount;
+    }
+    
+    await db.run(
+      "UPDATE users SET quota = ?, updated_at = ? WHERE id = ?",
+      [newQuota, DateUtils.nowSQLite(), id]
+    );
+    
+    logger.info('Admin updated user quota:', {
+      adminId: req.user?.id,
+      userId: id,
+      operation,
+      amount,
+      oldQuota: user.quota,
+      newQuota
+    });
+    
+    res.json({
+      success: true,
+      message: `User quota ${operation === 'add' ? 'increased' : 'updated'} successfully`,
+      data: {
+        userId: id,
+        oldQuota: user.quota,
+        newQuota,
+        operation,
+        amount
+      }
+    });
+  } catch (error) {
+    logger.error('Error updating user quota:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update user quota',
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Payment Methods Management Routes
+
+// Get all payment methods with status
+router.get('/payment-methods', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const db = getDatabase();
+    
+    // Fetch current payment channels from Tripay
+    const tripayChannels = await tripayService.getPaymentChannels();
+    
+    // Get existing payment method settings from database
+    const dbMethods = await db.all('SELECT * FROM payment_methods ORDER BY name ASC');
+    
+    // Merge Tripay data with database settings
+    const paymentMethods = tripayChannels.map(channel => {
+      const dbMethod = dbMethods.find(m => m.code === channel.code);
+      return {
+        code: channel.code,
+        name: channel.name,
+        type: channel.type,
+        icon_url: channel.icon_url,
+        fee_flat: channel.fee_customer?.flat || 0,
+        fee_percent: channel.fee_customer?.percent || 0,
+        minimum_fee: channel.minimum_fee || 0,
+        maximum_fee: channel.maximum_fee || 0,
+        is_enabled: dbMethod ? dbMethod.is_enabled === 1 : true,
+        id: dbMethod?.id || null,
+        created_at: dbMethod?.created_at || null,
+        updated_at: dbMethod?.updated_at || null
+      };
+    });
+
+    logger.info('Admin fetched payment methods:', {
+      adminId: req.user?.id,
+      totalMethods: paymentMethods.length,
+      enabledMethods: paymentMethods.filter(m => m.is_enabled).length
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment methods retrieved successfully',
+      data: paymentMethods
+    });
+  } catch (error: any) {
+    logger.error('Error fetching payment methods:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch payment methods',
+      error: error.message
+    });
+  }
+}));
+
+// Update payment method settings
+router.patch('/payment-methods/:code', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { code } = req.params;
+    const { is_enabled } = req.body;
+    
+    const db = getDatabase();
+    
+    // Check if payment method exists in our database
+    const existingMethod = await db.get(
+      'SELECT * FROM payment_methods WHERE code = ?',
+      [code]
+    );
+    
+    if (existingMethod) {
+      // Update existing record
+      await db.run(
+        "UPDATE payment_methods SET is_enabled = ?, updated_at = ? WHERE code = ?",
+        [is_enabled ? 1 : 0, DateUtils.nowSQLite(), code]
+      );
+    } else {
+      // Get payment method details from Tripay
+      const tripayChannels = await tripayService.getPaymentChannels();
+      const channel = tripayChannels.find(c => c.code === code);
+      
+      if (!channel) {
+        return res.status(404).json({
+          success: false,
+          message: 'Payment method not found'
+        });
+      }
+      
+      // Insert new record
+      await db.run(
+        `INSERT INTO payment_methods (code, name, type, icon_url, fee_flat, fee_percent, minimum_fee, maximum_fee, is_enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          channel.code,
+          channel.name,
+          channel.type,
+          channel.icon_url,
+          channel.fee_customer?.flat || 0,
+          channel.fee_customer?.percent || 0,
+          channel.minimum_fee || 0,
+          channel.maximum_fee || 0,
+          is_enabled ? 1 : 0,
+          DateUtils.nowSQLite(),
+          DateUtils.nowSQLite()
+        ]
+      );
+    }
+
+    logger.info('Admin updated payment method:', {
+      adminId: req.user?.id,
+      paymentCode: code,
+      isEnabled: is_enabled
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment method updated successfully',
+      data: { code, is_enabled }
+    });
+  } catch (error: any) {
+    logger.error('Error updating payment method:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update payment method',
+      error: error.message
+    });
+  }
+}));
+
+// Sync payment methods from Tripay
+router.post('/payment-methods/sync', asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const db = getDatabase();
+    
+    // Fetch current payment channels from Tripay
+    const tripayChannels = await tripayService.getPaymentChannels();
+    
+    let syncedCount = 0;
+    let newCount = 0;
+    
+    for (const channel of tripayChannels) {
+      const existingMethod = await db.get(
+        'SELECT * FROM payment_methods WHERE code = ?',
+        [channel.code]
+      );
+      
+      if (existingMethod) {
+        // Update existing method with latest Tripay data
+        await db.run(
+          `UPDATE payment_methods 
+           SET name = ?, type = ?, icon_url = ?, fee_flat = ?, fee_percent = ?, 
+               minimum_fee = ?, maximum_fee = ?, updated_at = ? 
+           WHERE code = ?`,
+          [
+            channel.name,
+            channel.type,
+            channel.icon_url,
+            channel.fee_customer?.flat || 0,
+            channel.fee_customer?.percent || 0,
+            channel.minimum_fee || 0,
+            channel.maximum_fee || 0,
+            DateUtils.nowSQLite(),
+            channel.code
+          ]
+        );
+        syncedCount++;
+      } else {
+        // Insert new payment method (enabled by default)
+        await db.run(
+          `INSERT INTO payment_methods (code, name, type, icon_url, fee_flat, fee_percent, minimum_fee, maximum_fee, is_enabled, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+          [
+            channel.code,
+            channel.name,
+            channel.type,
+            channel.icon_url,
+            channel.fee_customer?.flat || 0,
+            channel.fee_customer?.percent || 0,
+            channel.minimum_fee || 0,
+            channel.maximum_fee || 0,
+            DateUtils.nowSQLite(),
+            DateUtils.nowSQLite()
+          ]
+        );
+        newCount++;
+      }
+    }
+
+    logger.info('Admin synced payment methods:', {
+      adminId: req.user?.id,
+      totalFromTripay: tripayChannels.length,
+      syncedCount,
+      newCount
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment methods synced successfully',
+      data: {
+        totalFromTripay: tripayChannels.length,
+        syncedCount,
+        newCount
+      }
+    });
+  } catch (error: any) {
+    logger.error('Error syncing payment methods:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to sync payment methods',
+      error: error.message
+    });
+  }
+}));
+
+// Telegram Bot Management Routes
+router.get('/telegram-bot/status',
+  auditLogger('ADMIN_GET_BOT_STATUS'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const status = TelegramBotService.getStatus();
+      
+      res.json({
+        success: true,
+        message: 'Bot status retrieved successfully',
+        data: status
+      });
+    } catch (error) {
+      logger.error('Error getting bot status:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get bot status',
+        error: 'INTERNAL_ERROR'
+      });
+    }
+  })
+);
+
+router.post('/telegram-bot/start',
+  auditLogger('ADMIN_START_BOT'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      // Allow admin to specify polling mode to avoid webhook rate limits
+      const usePolling = req.body.usePolling === true || process.env['TELEGRAM_USE_POLLING'] === 'true';
+      const result = await TelegramBotService.startBot(usePolling);
+      
+      if (result.success) {
+        logger.info(`Telegram bot started by admin user ${req.user?.id} in ${usePolling ? 'polling' : 'webhook'} mode`);
+        res.json({
+          success: true,
+          message: `Bot started successfully in ${usePolling ? 'polling' : 'webhook'} mode`,
+          data: { status: 'running', mode: usePolling ? 'polling' : 'webhook' }
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: result.message || 'Failed to start bot',
+          error: 'BOT_START_FAILED'
+        });
+      }
+    } catch (error) {
+      logger.error('Error starting bot:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to start bot',
+        error: 'INTERNAL_ERROR'
+      });
+    }
+  })
+);
+
+router.post('/telegram-bot/stop',
+  auditLogger('ADMIN_STOP_BOT'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const result = await TelegramBotService.stopBot();
+      
+      if (result.success) {
+        logger.info(`Telegram bot stopped by admin user ${req.user?.id}`);
+        res.json({
+          success: true,
+          message: 'Bot stopped successfully',
+          data: { status: 'stopped' }
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: result.message || 'Failed to stop bot',
+          error: 'BOT_STOP_FAILED'
+        });
+      }
+    } catch (error) {
+      logger.error('Error stopping bot:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to stop bot',
+        error: 'INTERNAL_ERROR'
+      });
+    }
+  })
+);
+
+router.post('/telegram-bot/restart',
+  auditLogger('ADMIN_RESTART_BOT'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const result = await TelegramBotService.restartBot();
+      
+      if (result.success) {
+        logger.info(`Telegram bot restarted by admin user ${req.user?.id}`);
+        res.json({
+          success: true,
+          message: 'Bot restarted successfully',
+          data: { status: 'running' }
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: result.message || 'Failed to restart bot',
+          error: 'BOT_RESTART_FAILED'
+        });
+      }
+    } catch (error) {
+      logger.error('Error restarting bot:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to restart bot',
+        error: 'INTERNAL_ERROR'
+      });
+    }
+  })
+);
+
+router.get('/telegram-bot/stats',
+  auditLogger('ADMIN_GET_BOT_STATS'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const stats = TelegramBotService.getStats();
+      
+      res.json({
+        success: true,
+        message: 'Bot statistics retrieved successfully',
+        data: stats
+      });
+    } catch (error) {
+      logger.error('Error getting bot stats:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get bot statistics',
+        error: 'INTERNAL_ERROR'
+      });
+    }
+  })
+);
+
+// Get detailed BOT metrics
+router.get('/telegram-bot/metrics',
+  auditLogger('ADMIN_GET_BOT_METRICS'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { TelegramBotService } = await import('../services/telegramBotService.js');
+      const metrics = TelegramBotService.getDetailedMetrics();
+      
+      res.json({
+        success: true,
+        data: metrics
+      });
+    } catch (error) {
+      logger.error('Error getting bot metrics:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get bot metrics',
+        error: 'INTERNAL_ERROR'
       });
     }
   })

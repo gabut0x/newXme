@@ -57,6 +57,8 @@ export class SessionManager {
   private static readonly SESSION_PREFIX = 'session:';
   private static readonly USER_SESSIONS_PREFIX = 'user_sessions:';
   private static readonly BLACKLIST_PREFIX = 'blacklist:';
+  // 2FA challenge prefix
+  private static readonly TWOFA_CHALLENGE_PREFIX = '2fa_challenge:';
   
   static async createSession(userId: number, sessionData: any, expirationSeconds: number = 86400): Promise<string> {
     const client = getRedisClient();
@@ -148,6 +150,34 @@ export class SessionManager {
     const userSessionsKey = `${this.USER_SESSIONS_PREFIX}${userId}`;
     
     return await client.sCard(userSessionsKey);
+  }
+
+  // 2FA challenge helpers
+  static async createTwoFAChallenge(userId: number, expirationSeconds: number = 300): Promise<string> {
+    const client = getRedisClient();
+    const challengeId = `${userId}_${DateUtils.getJakartaUnixTimestamp()}_${Math.random().toString(36).slice(2, 10)}`;
+    const key = `${this.TWOFA_CHALLENGE_PREFIX}${challengeId}`;
+
+    const payload = {
+      userId,
+      createdAt: DateUtils.nowISO(),
+    };
+
+    await client.setEx(key, expirationSeconds, JSON.stringify(payload));
+    return challengeId;
+  }
+
+  static async getTwoFAChallenge(challengeId: string): Promise<{ userId: number; createdAt: string } | null> {
+    const client = getRedisClient();
+    const key = `${this.TWOFA_CHALLENGE_PREFIX}${challengeId}`;
+    const data = await client.get(key);
+    return data ? JSON.parse(data) : null;
+  }
+
+  static async deleteTwoFAChallenge(challengeId: string): Promise<void> {
+    const client = getRedisClient();
+    const key = `${this.TWOFA_CHALLENGE_PREFIX}${challengeId}`;
+    await client.del(key);
   }
 }
 

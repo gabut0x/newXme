@@ -78,6 +78,7 @@ import {
   ExternalLink,
   Download,
   Copy,
+  Database,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -1361,6 +1362,20 @@ username:s:Administrator`;
                           Admin
                         </Badge>
                       )}
+                      <Button
+                        onClick={loadData}
+                        variant="outline"
+                        size="sm"
+                        disabled={isLoading}
+                        className="ml-2"
+                      >
+                        {isLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Database className="h-4 w-4" />
+                        )}
+                        <span className="ml-2 hidden sm:inline">Refresh Data</span>
+                      </Button>
                     </div>
                   </div>
 
@@ -2301,7 +2316,7 @@ username:s:Administrator`;
                                 Installation Notifications
                               </Label>
                               <p className="text-xs text-muted-foreground">
-                                Get notified about installation status updates
+                                Get notified about completed installation status updates
                                 via Telegram
                               </p>
                             </div>

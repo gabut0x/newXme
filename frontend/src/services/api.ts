@@ -41,6 +41,20 @@ export interface AuthResponse {
   accessToken: string;
   sessionId: string;
   requiresVerification: boolean;
+  twoFactorRequired?: boolean;
+  challengeId?: string;
+}
+
+export interface TwoFactorVerifyRequest {
+  challengeId: string;
+  code: string;
+}
+
+export interface TwoFactorSetupResponse {
+  qrSvg: string;
+  secret: string;
+  otpauth: string;
+  qrBase64?: string;
 }
 
 export interface DashboardData {
@@ -256,7 +270,7 @@ class ApiService {
 
   constructor() {
     this.api = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || '/api',
+      baseURL: (import.meta.env.DEV ? '/api' : (import.meta.env.VITE_API_URL || '/api')),
       timeout: 10000,
       withCredentials: true, // For cookies
     });
@@ -307,11 +321,27 @@ class ApiService {
 
   // Auth endpoints
   async register(data: RegisterRequest): Promise<AxiosResponse<ApiResponse<AuthResponse>>> {
-    return this.api.post('/auth/register', data);
+    return this.api.post('/auth/register', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async login(data: LoginRequest): Promise<AxiosResponse<ApiResponse<AuthResponse>>> {
-    return this.api.post('/auth/login', data);
+    return this.api.post('/auth/login', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+
+  async verify2FA(data: TwoFactorVerifyRequest): Promise<AxiosResponse<ApiResponse<AuthResponse>>> {
+    return this.api.post('/auth/2fa/verify', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async logout(): Promise<AxiosResponse<ApiResponse>> {
@@ -330,19 +360,35 @@ class ApiService {
   }
 
   async refreshToken(): Promise<AxiosResponse<ApiResponse<{ accessToken: string; user: User }>>> {
-    return this.api.post('/auth/refresh');
+    return this.api.post('/auth/refresh', {}, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async verifyEmail(data: VerifyEmailRequest): Promise<AxiosResponse<ApiResponse<{ user: User }>>> {
-    return this.api.post('/auth/verify-email', data);
+    return this.api.post('/auth/verify-email', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async resendVerification(): Promise<AxiosResponse<ApiResponse>> {
-    return this.api.post('/auth/resend-verification');
+    return this.api.post('/auth/resend-verification', {}, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async forgotPassword(data: ForgotPasswordRequest): Promise<AxiosResponse<ApiResponse>> {
-    return this.api.post('/auth/forgot-password', data);
+    return this.api.post('/auth/forgot-password', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async validateResetToken(token: string): Promise<AxiosResponse<ApiResponse<{ email: string; username: string }>>> {
@@ -350,7 +396,11 @@ class ApiService {
   }
 
   async resetPassword(data: ResetPasswordRequest): Promise<AxiosResponse<ApiResponse>> {
-    return this.api.post('/auth/reset-password', data);
+    return this.api.post('/auth/reset-password', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   // User endpoints
@@ -359,7 +409,11 @@ class ApiService {
   }
 
   async updateProfile(data: UpdateProfileRequest): Promise<AxiosResponse<ApiResponse<{ user: User }>>> {
-    return this.api.put('/user/profile', data);
+    return this.api.put('/user/profile', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async getDashboard(): Promise<AxiosResponse<ApiResponse<DashboardData>>> {
@@ -408,7 +462,11 @@ class ApiService {
   }
 
   async createInstall(data: CreateInstallRequest): Promise<AxiosResponse<ApiResponse<InstallData>>> {
-    return this.api.post('/user/install', data);
+    return this.api.post('/user/install', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async getInstallHistory(): Promise<AxiosResponse<ApiResponse<InstallData[]>>> {
@@ -416,11 +474,19 @@ class ApiService {
   }
   // Topup endpoints
   async calculateTopup(data: TopupCalculationRequest): Promise<AxiosResponse<ApiResponse<TopupCalculationResponse>>> {
-    return this.api.post('/user/topup/calculate', data);
+    return this.api.post('/user/topup/calculate', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async createTopup(data: TopupRequest): Promise<AxiosResponse<ApiResponse<TopupResponse>>> {
-    return this.api.post('/user/topup', data);
+    return this.api.post('/user/topup', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async getTopupHistory(): Promise<AxiosResponse<ApiResponse<TopupTransaction[]>>> {
@@ -505,16 +571,52 @@ class ApiService {
   }
 
   // Admin endpoints
+  async getAdmin2FAStatus(): Promise<AxiosResponse<ApiResponse<{ enabled: boolean }>>> {
+    return this.api.get('/admin/2fa/status');
+  }
+
+  async setupAdmin2FA(): Promise<AxiosResponse<ApiResponse<TwoFactorSetupResponse>>> {
+    return this.api.post('/admin/2fa/setup', {}, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+
+  async enableAdmin2FA(code: string, secret: string): Promise<AxiosResponse<ApiResponse<{ enabled: boolean }>>> {
+    return this.api.post('/admin/2fa/enable', { code, secret }, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+
+  async disableAdmin2FA(code: string): Promise<AxiosResponse<ApiResponse<{ enabled: boolean }>>> {
+    return this.api.post('/admin/2fa/disable', { code }, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+
   async getAdminWindowsVersions(): Promise<AxiosResponse<ApiResponse<WindowsVersion[]>>> {
     return this.api.get('/admin/windows-versions');
   }
 
   async createWindowsVersion(data: CreateWindowsVersionRequest): Promise<AxiosResponse<ApiResponse<WindowsVersion>>> {
-    return this.api.post('/admin/windows-versions', data);
+    return this.api.post('/admin/windows-versions', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async updateWindowsVersion(id: number, data: CreateWindowsVersionRequest): Promise<AxiosResponse<ApiResponse<WindowsVersion>>> {
-    return this.api.put(`/admin/windows-versions/${id}`, data);
+    return this.api.put(`/admin/windows-versions/${id}`, data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async deleteWindowsVersion(id: number): Promise<AxiosResponse<ApiResponse>> {
@@ -526,11 +628,19 @@ class ApiService {
   }
 
   async createProduct(data: CreateProductRequest): Promise<AxiosResponse<ApiResponse<Product>>> {
-    return this.api.post('/admin/products', data);
+    return this.api.post('/admin/products', data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async updateProduct(id: number, data: CreateProductRequest): Promise<AxiosResponse<ApiResponse<Product>>> {
-    return this.api.put(`/admin/products/${id}`, data);
+    return this.api.put(`/admin/products/${id}`, data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async deleteProduct(id: number): Promise<AxiosResponse<ApiResponse>> {
@@ -542,7 +652,11 @@ class ApiService {
   }
 
   async updateUser(id: number, data: { is_active?: boolean; admin?: number; telegram?: string }): Promise<AxiosResponse<ApiResponse<User>>> {
-    return this.api.put(`/admin/users/${id}`, data);
+    return this.api.put(`/admin/users/${id}`, data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async getAdminInstallData(): Promise<AxiosResponse<ApiResponse<InstallData[]>>> {
@@ -550,7 +664,11 @@ class ApiService {
   }
 
   async updateInstallData(id: number, data: { status: string }): Promise<AxiosResponse<ApiResponse<InstallData>>> {
-    return this.api.put(`/admin/install-data/${id}`, data);
+    return this.api.put(`/admin/install-data/${id}`, data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async deleteInstallData(id: number): Promise<AxiosResponse<ApiResponse>> {
@@ -562,7 +680,11 @@ class ApiService {
   }
 
   async updateUserQuota(id: number, data: { amount: number; operation: 'add' | 'set' }): Promise<AxiosResponse<ApiResponse<{ userId: number; oldQuota: number; newQuota: number; operation: string; amount: number }>>> {
-    return this.api.post(`/admin/users/${id}/quota`, data);
+    return this.api.post(`/admin/users/${id}/quota`, data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   // Admin payment methods endpoints
@@ -571,7 +693,11 @@ class ApiService {
   }
 
   async updatePaymentMethod(code: string, data: PaymentMethodUpdateRequest): Promise<AxiosResponse<ApiResponse<{ code: string; is_enabled: boolean }>>> {
-    return this.api.patch(`/admin/payment-methods/${code}`, data);
+    return this.api.patch(`/admin/payment-methods/${code}`, data, {
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async syncPaymentMethods(): Promise<AxiosResponse<ApiResponse<{ totalFromTripay: number; syncedCount: number; newCount: number }>>> {

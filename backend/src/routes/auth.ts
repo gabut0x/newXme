@@ -24,7 +24,8 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyEmailSchema,
-  ApiResponse
+  ApiResponse,
+  verify2FASchema
 } from '../types/user.js';
 
 // Services and utilities
@@ -33,6 +34,7 @@ import { emailService } from '../services/emailService.js';
 import { SessionManager } from '../config/redis.js';
 import { AuthUtils } from '../utils/auth.js';
 import { logger } from '../utils/logger.js';
+import { authenticator } from 'otplib';
 
 const router = express.Router();
 
@@ -146,6 +148,21 @@ router.post('/login',
 
     // Reset failed login attempts on successful login
     await UserService.resetFailedLoginAttempts(user.id);
+
+    // If admin with 2FA enabled, interrupt login and issue challenge
+    const requiresTwoFA = Boolean(user.admin) && (user.two_factor_enabled === true || user.two_factor_enabled === 1) && !!user.totp_secret;
+    if (requiresTwoFA) {
+      const challengeId = await SessionManager.createTwoFAChallenge(user.id, 300); // 5 minutes
+      logger.info('2FA challenge created for user:', { userId: user.id, challengeId });
+      return res.json({
+        success: true,
+        message: 'Two-factor authentication required',
+        data: {
+          twoFactorRequired: true,
+          challengeId
+        }
+      } as ApiResponse);
+    }
 
     // Generate tokens
     const tokenPayload = {
@@ -440,6 +457,76 @@ router.post('/reset-password',
     res.json({
       success: true,
       message: 'Password reset successfully. Please log in with your new password.'
+    } as ApiResponse);
+  })
+);
+
+// 2FA verify endpoint
+router.post('/2fa/verify',
+  validateRequest(verify2FASchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { challengeId, code } = req.body;
+
+    const challenge = await SessionManager.getTwoFAChallenge(challengeId);
+    if (!challenge) {
+      throw new UnauthorizedError('Invalid or expired 2FA challenge', 'INVALID_CHALLENGE');
+    }
+
+    const user = await UserService.getUserById(challenge.userId);
+    if (!user) {
+      await SessionManager.deleteTwoFAChallenge(challengeId);
+      throw new UnauthorizedError('User not found', 'USER_NOT_FOUND');
+    }
+
+    if (!user.totp_secret) {
+      await SessionManager.deleteTwoFAChallenge(challengeId);
+      throw new UnauthorizedError('2FA not configured for this user', 'TWOFA_NOT_CONFIGURED');
+    }
+
+    const isValid = authenticator.verify({ token: code, secret: user.totp_secret });
+    if (!isValid) {
+      throw new UnauthorizedError('Invalid 2FA code', 'INVALID_CODE');
+    }
+
+    // Valid - complete login
+    await SessionManager.deleteTwoFAChallenge(challengeId);
+
+    const tokenPayload = {
+      userId: user.id,
+      username: user.username,
+      email: user.email,
+      isVerified: user.is_verified
+    };
+
+    const accessToken = AuthUtils.generateAccessToken(tokenPayload);
+    const refreshToken = AuthUtils.generateRefreshToken(tokenPayload);
+
+    const sessionId = await SessionManager.createSession(user.id, {
+      userId: user.id,
+      username: user.username,
+      email: user.email,
+      isVerified: user.is_verified,
+      createdAt: new Date().toISOString()
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    logger.info('2FA verified and login completed:', { userId: user.id });
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        user: await UserService.getPublicUserData(user.id),
+        accessToken,
+        sessionId,
+        requiresVerification: !user.is_verified
+      }
     } as ApiResponse);
   })
 );

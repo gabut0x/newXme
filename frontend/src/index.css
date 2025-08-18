@@ -294,7 +294,7 @@
 /* Mobile table responsive */
 @media (max-width: 768px) {
   .table-responsive {
-    @apply block overflow-x-auto whitespace-nowrap;
+    @apply overflow-x-auto whitespace-nowrap;
   }
   
   .table-responsive table {
@@ -305,6 +305,6 @@
 /* Mobile dialog responsive */
 @media (max-width: 640px) {
   .dialog-responsive {
-    @apply m-2 max-w-none w-auto;
+    @apply w-full;
   }
 }

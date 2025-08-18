@@ -448,7 +448,7 @@ export class BotSecurity {
     const commandArgRules: { [key: string]: { maxArgs: number; pattern?: RegExp; required?: boolean } } = {
       '/start': { maxArgs: 1, pattern: /^[a-zA-Z0-9_-]*$/ }, // Optional connection token
       '/topup': { maxArgs: 2, pattern: /^[0-9]+$/ }, // Amount and optional payment method
-      '/install': { maxArgs: 3, pattern: /^[a-zA-Z0-9._-]+$/ }, // Version, edition, architecture
+      '/install': { maxArgs: 4 }, // ip, vps_password, win_version, rdp_password
       '/winver': { maxArgs: 0 }, // No arguments
       '/versions': { maxArgs: 0 }, // No arguments
       '/myquota': { maxArgs: 0 }, // No arguments

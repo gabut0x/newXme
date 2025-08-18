@@ -14,6 +14,7 @@ import RecaptchaComponent, { RecaptchaRef } from '@/components/ui/recaptcha';
 import { TermsOfServiceModal } from '@/components/TermsOfServiceModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp';
 import {
   Code,
   Eye,
@@ -34,8 +35,10 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
+  const [otp, setOtp] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
   const recaptchaRef = useRef<RecaptchaRef>(null);
-  const { login, state, clearError } = useAuth();
+  const { login, state, clearError, verifyTwoFactor, clearTwoFactor } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -64,7 +67,14 @@ export default function LoginPage() {
 
     setIsLoading(true);
     try {
-      await login(data.username, data.password, recaptchaToken);
+      const result = await login(data.username, data.password, recaptchaToken);
+      if (result.twoFactorRequired) {
+        toast({
+          title: 'Two-factor authentication required',
+          description: 'Enter the 6-digit code from your authenticator app to continue.',
+        });
+        return; // Do not navigate yet
+      }
       toast({
         title: 'Welcome back!',
         description: 'You have been successfully logged in.',
@@ -83,6 +93,38 @@ export default function LoginPage() {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const onVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (otp.length !== 6) return;
+
+    setIsVerifying(true);
+    try {
+      await verifyTwoFactor(otp);
+      toast({
+        title: '2FA verified',
+        description: 'You have been successfully logged in.',
+      });
+      navigate('/dashboard');
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Verification failed',
+        description: error.message || 'Invalid or expired code. Please try again.',
+      });
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const onBackToLogin = () => {
+    clearTwoFactor();
+    setOtp('');
+    if (recaptchaRef.current) {
+      recaptchaRef.current.reset();
+      setRecaptchaToken(null);
     }
   };
 
@@ -110,7 +152,7 @@ export default function LoginPage() {
               <CardHeader className="text-center">
                 <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
                 <CardDescription>
-                  Sign in to your XME Projects account
+                  {state.twoFactorRequired ? 'Enter your 2FA code to continue' : 'Sign in to your XME Projects account'}
                 </CardDescription>
               </CardHeader>
               
@@ -122,109 +164,161 @@ export default function LoginPage() {
                   </Alert>
                 )}
 
-                <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="username">Username or Email</Label>
-                    <Input
-                      id="username"
-                      type="text"
-                      placeholder="Enter your username or email"
-                      {...register('username')}
-                      className={errors.username ? 'border-destructive' : ''}
-                    />
-                    {errors.username && (
-                      <p className="text-sm text-destructive">{errors.username.message}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="password">Password</Label>
-                    <div className="relative">
+                {!state.twoFactorRequired ? (
+                  <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="username">Username or Email</Label>
                       <Input
-                        id="password"
-                        type={showPassword ? 'text' : 'password'}
-                        placeholder="Enter your password"
-                        {...register('password')}
-                        className={errors.password ? 'border-destructive pr-10' : 'pr-10'}
+                        id="username"
+                        type="text"
+                        placeholder="Enter your username or email"
+                        {...register('username')}
+                        className={errors.username ? 'border-destructive' : ''}
                       />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                        onClick={() => setShowPassword(!showPassword)}
-                      >
-                        {showPassword ? (
-                          <EyeOff className="h-4 w-4 text-muted-foreground" />
-                        ) : (
-                          <Eye className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </Button>
+                      {errors.username && (
+                        <p className="text-sm text-destructive">{errors.username.message}</p>
+                      )}
                     </div>
-                    {errors.password && (
-                      <p className="text-sm text-destructive">{errors.password.message}</p>
-                    )}
-                  </div>
 
-                  <div className="flex items-center justify-between">
-                    <Link 
-                      to="/forgot-password" 
-                      className="text-sm text-primary hover:text-primary/80 transition-colors"
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="Enter your password"
+                          {...register('password')}
+                          className={errors.password ? 'border-destructive pr-10' : 'pr-10'}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                          onClick={() => setShowPassword(!showPassword)}
+                        >
+                          {showPassword ? (
+                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <Eye className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </Button>
+                      </div>
+                      {errors.password && (
+                        <p className="text-sm text-destructive">{errors.password.message}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <Link 
+                        to="/forgot-password" 
+                        className="text-sm text-primary hover:text-primary/80 transition-colors"
+                      >
+                        Forgot password?
+                      </Link>
+                    </div>
+
+                    {/* reCAPTCHA */}
+                    <div className="flex justify-center">
+                      <RecaptchaComponent
+                        ref={recaptchaRef}
+                        onVerify={(token) => setRecaptchaToken(token)}
+                        onExpired={() => setRecaptchaToken(null)}
+                        onError={() => setRecaptchaToken(null)}
+                        theme="light"
+                        size="normal"
+                      />
+                    </div>
+
+                    <Button 
+                      type="submit" 
+                      className="w-full"
+                      disabled={isLoading || !recaptchaToken}
                     >
-                      Forgot password?
-                    </Link>
-                  </div>
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Signing in...
+                        </>
+                      ) : (
+                        'Sign In'
+                      )}
+                    </Button>
+                  </form>
+                ) : (
+                  <form onSubmit={onVerifyOtp} className="space-y-6">
+                    <div className="space-y-2 text-center">
+                      <Label htmlFor="otp">Enter 6-digit code</Label>
+                      <div className="flex justify-center">
+                        <InputOTP maxLength={6} value={otp} onChange={setOtp} id="otp">
+                          <InputOTPGroup>
+                            <InputOTPSlot index={0} />
+                            <InputOTPSlot index={1} />
+                            <InputOTPSlot index={2} />
+                          </InputOTPGroup>
+                          <InputOTPSeparator />
+                          <InputOTPGroup>
+                            <InputOTPSlot index={3} />
+                            <InputOTPSlot index={4} />
+                            <InputOTPSlot index={5} />
+                          </InputOTPGroup>
+                        </InputOTP>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Open your authenticator app and enter the current code.</p>
+                    </div>
 
-                  {/* reCAPTCHA */}
-                  <div className="flex justify-center">
-                    <RecaptchaComponent
-                      ref={recaptchaRef}
-                      onVerify={(token) => setRecaptchaToken(token)}
-                      onExpired={() => setRecaptchaToken(null)}
-                      onError={() => setRecaptchaToken(null)}
-                      theme="light"
-                      size="normal"
-                    />
-                  </div>
-
-                  <Button 
-                    type="submit" 
-                    className="w-full"
-                    disabled={isLoading || !recaptchaToken}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Signing in...
-                      </>
-                    ) : (
-                      'Sign In'
-                    )}
-                  </Button>
-                </form>
-
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <Separator />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-card px-2 text-muted-foreground">
-                      Or
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground">
-                    Don't have an account?{' '}
-                    <Link 
-                      to="/register" 
-                      className="text-primary hover:text-primary/80 font-medium transition-colors"
+                    <Button 
+                      type="submit" 
+                      className="w-full"
+                      disabled={isVerifying || otp.length !== 6}
                     >
-                      Sign up
-                    </Link>
-                  </p>
-                </div>
+                      {isVerifying ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Verifying...
+                        </>
+                      ) : (
+                        'Verify and Sign In'
+                      )}
+                    </Button>
+
+                    <Button 
+                      type="button" 
+                      variant="ghost" 
+                      className="w-full"
+                      onClick={onBackToLogin}
+                    >
+                      Back to login
+                    </Button>
+                  </form>
+                )}
+
+                {!state.twoFactorRequired && (
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <Separator />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-card px-2 text-muted-foreground">
+                        Or
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {!state.twoFactorRequired && (
+                  <div className="text-center">
+                    <p className="text-xs text-muted-foreground">
+                      Don't have an account?{' '}
+                      <Link 
+                        to="/register" 
+                        className="text-primary hover:text-primary/80 font-medium transition-colors"
+                      >
+                        Sign up
+                      </Link>
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

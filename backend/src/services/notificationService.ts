@@ -163,29 +163,38 @@ export class NotificationService {
     // Send real-time notification to dashboard
     this.sendRealTimeNotification(update.userId, notification);
 
-    // Send Telegram notification if user has enabled it
-    try {
-      const { TelegramBotService } = await import('./telegramBotService.js');
-      const telegramSent = await TelegramBotService.sendInstallationNotification(update.userId, {
-        status: update.status,
-        ip: update.ip || 'Unknown',
-        winVersion: update.winVersion || 'Unknown',
-        message: update.message
-      });
+    // Send Telegram notification ONLY for completed installations if user has enabled it
+    if (update.status === 'completed') {
+      try {
+        const { TelegramBotService } = await import('./telegramBotService.js');
+        const telegramSent = await TelegramBotService.sendInstallationNotification(update.userId, {
+          status: update.status,
+          ip: update.ip || 'Unknown',
+          winVersion: update.winVersion || 'Unknown',
+          message: update.message,
+          installId: update.installId
+        });
 
-      logger.info('Install status update notification sent:', {
+        logger.info('Installation completion notification sent to Telegram:', {
+          userId: update.userId,
+          installId: update.installId,
+          status: update.status,
+          message: update.message,
+          timestamp: update.timestamp,
+          telegramSent: telegramSent
+        });
+      } catch (error) {
+        logger.error('Failed to send Telegram notification for installation completion:', {
+          userId: update.userId,
+          installId: update.installId,
+          error: error instanceof Error ? error.message : error
+        });
+      }
+    } else {
+      logger.debug('Skipping Telegram notification for non-completed status:', {
         userId: update.userId,
         installId: update.installId,
-        status: update.status,
-        message: update.message,
-        timestamp: update.timestamp,
-        telegramSent: telegramSent
-      });
-    } catch (error) {
-      logger.error('Failed to send Telegram notification for install status update:', {
-        userId: update.userId,
-        installId: update.installId,
-        error: error instanceof Error ? error.message : error
+        status: update.status
       });
       
       // Still log the dashboard notification as successful
@@ -195,7 +204,7 @@ export class NotificationService {
         status: update.status,
         message: update.message,
         timestamp: update.timestamp,
-        telegramError: true
+        telegramSkipped: true
       });
     }
   }

@@ -11,6 +11,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp';
+import { 
+  Pagination, 
+  PaginationContent, 
+  PaginationItem, 
+  PaginationLink 
+} from '@/components/ui/pagination';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -22,7 +29,8 @@ import {
   InstallData,
   CreateWindowsVersionRequest,
   CreateProductRequest,
-  PaymentMethod
+  PaymentMethod,
+  TwoFactorSetupResponse
 } from '@/services/api';
 import {
   Code,
@@ -53,7 +61,13 @@ import {
   Webhook,
   Bot,
   Play,
-  Square
+  Square,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  KeyRound,
+  Smartphone,
+  QrCode
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -74,7 +88,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 export default function AdminDashboardPage() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'windows' | 'products' | 'users' | 'installs' | 'payments' | 'telegram'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'windows' | 'products' | 'users' | 'installs' | 'payments' | 'telegram' | '2fa'>('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -224,6 +238,21 @@ export default function AdminDashboardPage() {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
+  // Pagination states
+  const [usersPage, setUsersPage] = useState(1);
+  const [installsPage, setInstallsPage] = useState(1);
+
+  // Search states
+  const [usersSearch, setUsersSearch] = useState('');
+  const [installsSearch, setInstallsSearch] = useState('');
+
+  // 2FA states
+  const [twoFactorStatus, setTwoFactorStatus] = useState<{ enabled: boolean } | null>(null);
+  const [twoFactorSetup, setTwoFactorSetup] = useState<TwoFactorSetupResponse | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
+  const [showQRCode, setShowQRCode] = useState(false);
+
   const { state, logout } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -243,6 +272,10 @@ export default function AdminDashboardPage() {
     loadData();
   }, [state.user, navigate]);
 
+  // Reset pagination when search query changes
+  useEffect(() => { setUsersPage(1); }, [usersSearch]);
+  useEffect(() => { setInstallsPage(1); }, [installsSearch]);
+
   // Load telegram status when telegram tab is active
   useEffect(() => {
     if (activeTab === 'telegram') {
@@ -255,12 +288,13 @@ export default function AdminDashboardPage() {
   const loadData = async () => {
     try {
       setIsLoading(true);
-      const [windowsRes, productsRes, usersRes, installsRes, paymentsRes] = await Promise.all([
+      const [windowsRes, productsRes, usersRes, installsRes, paymentsRes, twoFactorRes] = await Promise.all([
         apiService.getAdminWindowsVersions(),
         apiService.getAdminProducts(),
         apiService.getAdminUsers(),
         apiService.getAdminInstallData(),
-        apiService.getAdminPaymentMethods()
+        apiService.getAdminPaymentMethods(),
+        apiService.getAdmin2FAStatus()
       ]);
 
       if (windowsRes.data.data) setWindowsVersions(windowsRes.data.data);
@@ -268,6 +302,7 @@ export default function AdminDashboardPage() {
       if (usersRes.data.data) setUsers(usersRes.data.data);
       if (installsRes.data.data) setInstallData(installsRes.data.data);
       if (paymentsRes.data.data) setPaymentMethods(paymentsRes.data.data);
+      if (twoFactorRes.data.data) setTwoFactorStatus(twoFactorRes.data.data);
     } catch (error: any) {
       toast({
         variant: 'destructive',
@@ -285,6 +320,121 @@ export default function AdminDashboardPage() {
       navigate('/');
     } catch (error) {
       navigate('/');
+    }
+  };
+
+  // 2FA handlers
+  const sanitizeQrSvg = (svg: string): string => {
+    try {
+      if (!svg) return svg;
+      // Remove stray backticks
+      let s = svg.replace(/`/g, '');
+      // Remove any existing/malformed xmlns attributes (quoted or unquoted)
+      s = s.replace(/\s+xmlns\s*=\s*(["'])[\s\S]*?\1/gi, '');
+      s = s.replace(/\s+xmlns\s*=\s*[^\s>]+/gi, '');
+      // Inject the correct xmlns deterministically
+      s = s.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+      return s;
+    } catch {
+      return svg;
+    }
+  };
+  const handleSetup2FA = async () => {
+    try {
+      setTwoFactorLoading(true);
+      const response = await apiService.setupAdmin2FA();
+      if (response.data.data) {
+        const data = response.data.data as TwoFactorSetupResponse;
+        const sanitized: TwoFactorSetupResponse = {
+          ...data,
+          qrSvg: sanitizeQrSvg(data.qrSvg),
+        };
+        setTwoFactorSetup(sanitized);
+        setShowQRCode(true);
+        toast({
+          title: '2FA Setup Started',
+          description: 'Scan the QR code with your authenticator app.',
+        });
+      }
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Setup failed',
+        description: error.response?.data?.message || 'Failed to setup 2FA',
+      });
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const handleEnable2FA = async () => {
+    if (!twoFactorCode || twoFactorCode.length !== 6) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid code',
+        description: 'Please enter a 6-digit code from your authenticator app.',
+      });
+      return;
+    }
+
+    if (!twoFactorSetup?.secret) {
+      toast({
+        variant: 'destructive',
+        title: 'Setup required',
+        description: 'Please setup 2FA first before enabling it.',
+      });
+      return;
+    }
+
+    try {
+      setTwoFactorLoading(true);
+      await apiService.enableAdmin2FA(twoFactorCode, twoFactorSetup.secret);
+      setTwoFactorStatus({ enabled: true });
+      setShowQRCode(false);
+      setTwoFactorSetup(null);
+      setTwoFactorCode('');
+      toast({
+        title: '2FA Enabled',
+        description: 'Two-factor authentication has been successfully enabled.',
+      });
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Enable failed',
+        description: error.response?.data?.message || 'Failed to enable 2FA',
+      });
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    if (!twoFactorCode || twoFactorCode.length !== 6) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid code',
+        description: 'Please enter a 6-digit code from your authenticator app.',
+      });
+      return;
+    }
+
+    try {
+      setTwoFactorLoading(true);
+      await apiService.disableAdmin2FA(twoFactorCode);
+      setTwoFactorStatus({ enabled: false });
+      setTwoFactorCode('');
+      toast({
+        title: '2FA Disabled',
+        description: 'Two-factor authentication has been disabled.',
+      });
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Disable failed',
+        description: error.response?.data?.message || 'Failed to disable 2FA',
+      });
+    } finally {
+      setTwoFactorLoading(false);
     }
   };
 
@@ -809,6 +959,77 @@ export default function AdminDashboardPage() {
     }
   };
 
+  // Pagination
+  const ITEMS_PER_PAGE = 15;
+
+  const getPaginatedData = <T,>(data: T[], page: number): T[] => {
+    const startIndex = (page - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    return data.slice(startIndex, endIndex);
+  };
+
+  const getTotalPages = (totalItems: number): number => {
+    return Math.ceil(totalItems / ITEMS_PER_PAGE);
+  };
+
+  const renderPagination = (
+    currentPage: number,
+    totalItems: number,
+    onPageChange: (page: number) => void,
+  ) => {
+    const totalPages = getTotalPages(totalItems);
+
+    if (totalPages <= 1) return null;
+
+    return (
+      <div className="flex w-full items-center justify-between mt-6">
+        <p className="text-xs text-muted-foreground w-full">
+          Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, totalItems)} of {totalItems} entries
+        </p>
+
+        <Pagination>
+          <PaginationContent>
+            <PaginationItem>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onPageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Previous
+              </Button>
+            </PaginationItem>
+
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+              <PaginationItem key={page}>
+                <PaginationLink
+                  onClick={() => onPageChange(page)}
+                  isActive={page === currentPage}
+                  className="cursor-pointer"
+                >
+                  {page}
+                </PaginationLink>
+              </PaginationItem>
+            ))}
+
+            <PaginationItem>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onPageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      </div>
+    );
+  };
+
   // Sidebar menu items
   const menuItems = [
     {
@@ -845,6 +1066,11 @@ export default function AdminDashboardPage() {
       id: 'telegram',
       label: 'Telegram Bot',
       icon: Bot,
+    },
+    {
+      id: '2fa',
+      label: 'Admin 2FA',
+      icon: KeyRound,
     },
   ];
 
@@ -895,10 +1121,7 @@ export default function AdminDashboardPage() {
               <span className="hidden sm:inline">User View</span>
             </Button>
             <ThemeToggle />
-            <Button variant="ghost" size="sm">
-              <Bell className="h-4 w-4" />
-            </Button>
-            
+           
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="flex items-center gap-2">
@@ -985,9 +1208,24 @@ export default function AdminDashboardPage() {
             {/* Dashboard Tab */}
             {activeTab === 'dashboard' && (
               <div className="space-y-6">
-                <div>
-                  <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-2">Admin Dashboard</h2>
-                  <p className="text-xs md:text-sm text-muted-foreground">Manage your XME Projects platform</p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-2">Admin Dashboard</h2>
+                    <p className="text-xs md:text-sm text-muted-foreground">Manage your XME Projects platform</p>
+                  </div>
+                  <Button
+                    onClick={loadData}
+                    disabled={isLoading}
+                    variant="outline"
+                    className="flex items-center gap-2"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Database className="h-4 w-4" />
+                    )}
+                    Refresh Data
+                  </Button>
                 </div>
 
                 {/* Stats Grid */}
@@ -1358,7 +1596,7 @@ export default function AdminDashboardPage() {
                             )}
                           </div>
                         </div>
-                        <DialogFooter className="mt-6">
+                        <DialogFooter className="mt-6 gap-2">
                           <Button type="button" variant="outline" onClick={() => setProductDialog(false)}>
                             Cancel
                           </Button>
@@ -1434,65 +1672,187 @@ export default function AdminDashboardPage() {
             {/* Users Tab */}
             {activeTab === 'users' && (
               <div className="space-y-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-foreground mb-2">Users</h2>
-                  <p className="text-xs md:text-sm text-muted-foreground">Manage user accounts and permissions</p>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-foreground mb-2">Users</h2>
+                    <p className="text-xs md:text-sm text-muted-foreground">Manage user accounts and permissions</p>
+                  </div>
+                  <div className="w-full md:w-auto">
+                    <div className="relative">
+                      <Input
+                        value={usersSearch}
+                        onChange={(e) => setUsersSearch(e.target.value)}
+                        placeholder="Search users..."
+                        className="pl-9 w-full md:w-64"
+                      />
+                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    </div>
+                  </div>
                 </div>
 
                 <Card>
                   <CardContent className="p-6">
-                    <div className="table-responsive">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-12">#</TableHead>
-                            <TableHead>Username</TableHead>
-                            <TableHead className="hidden md:table-cell">Email</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Role</TableHead>
-                            <TableHead className="hidden lg:table-cell">Quota</TableHead>
-                            <TableHead>Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {users.map((user, index) => (
-                            <TableRow key={user.id}>
-                              <TableCell className="font-medium">{index + 1}</TableCell>
-                              <TableCell className="font-medium">
-                                <div className="flex items-center gap-2">
-                                  <Avatar className="h-6 w-6">
-                                    <AvatarFallback className="text-xs">
-                                      {user.username.slice(0, 2).toUpperCase()}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  <span>{user.username}</span>
+                    {/* Desktop Table View */}
+                    <div className="hidden md:block">
+                      <ScrollArea className="h-[440px]">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-12">#</TableHead>
+                              <TableHead>Username</TableHead>
+                              <TableHead className="hidden md:table-cell">Email</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Role</TableHead>
+                              <TableHead className="hidden lg:table-cell">Quota</TableHead>
+                              <TableHead>Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {getPaginatedData(
+                              usersSearch ? users.filter(u =>
+                                (u.username?.toLowerCase().includes(usersSearch.toLowerCase())) ||
+                                (u.email?.toLowerCase().includes(usersSearch.toLowerCase())) ||
+                                (u.admin?.toString() === usersSearch.toLowerCase()) ||
+                                ((u.quota ?? 0).toString().includes(usersSearch))
+                              ) : users,
+                              usersPage
+                            ).map((user, index) => (
+                              <TableRow key={user.id}>
+                                <TableCell className="font-medium">{(usersPage - 1) * ITEMS_PER_PAGE + index + 1}</TableCell>
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2">
+                                    <Avatar className="h-6 w-6">
+                                      <AvatarFallback className="text-xs">
+                                        {user.username.slice(0, 2).toUpperCase()}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                    <span>{user.username}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="hidden md:table-cell">{user.email}</TableCell>
+                                <TableCell>
+                                  <Badge variant={user.is_verified ? "default" : "secondary"}>
+                                    {user.is_verified ? "Verified" : "Unverified"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Select
+                                    value={user.admin?.toString() || "0"}
+                                    onValueChange={(value) => handleUpdateUser(user.id, { admin: parseInt(value) })}
+                                  >
+                                    <SelectTrigger className="w-24">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="0">User</SelectItem>
+                                      <SelectItem value="1">Admin</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                                <TableCell className="hidden lg:table-cell">
+                                  <Badge variant="outline">{user.quota || 0}</Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex gap-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSelectedUser(user);
+                                        setQuotaForm({ amount: 0, operation: 'add' });
+                                        setQuotaDialog(true);
+                                      }}
+                                      title="Update Quota"
+                                    >
+                                      <Coins className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSelectedUser(user);
+                                        setDeleteUserDialog(true);
+                                      }}
+                                      title="Delete User"
+                                      className="text-destructive hover:text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </ScrollArea>
+                    </div>
+
+                    <div className="hidden md:block">{renderPagination(usersPage, (usersSearch ? users.filter(u =>
+                      (u.username?.toLowerCase().includes(usersSearch.toLowerCase())) ||
+                      (u.email?.toLowerCase().includes(usersSearch.toLowerCase())) ||
+                      (u.admin?.toString() === usersSearch.toLowerCase()) ||
+                      ((u.quota ?? 0).toString().includes(usersSearch))
+                    ).length : users.length), setUsersPage)}</div>
+
+                    {/* Mobile Card View */}
+                    <div className="md:hidden">
+                      <ScrollArea className="h-[440px]">
+                        <div className="space-y-4 pr-4">
+                          {getPaginatedData(
+                            usersSearch ? users.filter(u =>
+                              (u.username?.toLowerCase().includes(usersSearch.toLowerCase())) ||
+                              (u.email?.toLowerCase().includes(usersSearch.toLowerCase())) ||
+                              (u.admin?.toString() === usersSearch.toLowerCase()) ||
+                              ((u.quota ?? 0).toString().includes(usersSearch))
+                            ) : users,
+                            usersPage
+                          ).map((user, index) => (
+                            <Card key={user.id} className="hover:shadow-md transition-shadow">
+                              <CardContent className="p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-3">
+                                    <Avatar className="h-10 w-10">
+                                      <AvatarFallback className="text-sm">
+                                        {user.username.slice(0, 2).toUpperCase()}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                    <div>
+                                      <p className="font-medium">{user.username}</p>
+                                      <p className="text-sm text-muted-foreground">#{(usersPage - 1) * ITEMS_PER_PAGE + index + 1}</p>
+                                    </div>
+                                  </div>
+                                  <Badge variant={user.is_verified ? "default" : "secondary"}>
+                                    {user.is_verified ? "Verified" : "Unverified"}
+                                  </Badge>
                                 </div>
-                              </TableCell>
-                              <TableCell className="hidden md:table-cell">{user.email}</TableCell>
-                              <TableCell>
-                                <Badge variant={user.is_verified ? "default" : "secondary"}>
-                                  {user.is_verified ? "Verified" : "Unverified"}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <Select
-                                  value={user.admin?.toString() || "0"}
-                                  onValueChange={(value) => handleUpdateUser(user.id, { admin: parseInt(value) })}
-                                >
-                                  <SelectTrigger className="w-24">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="0">User</SelectItem>
-                                    <SelectItem value="1">Admin</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </TableCell>
-                              <TableCell className="hidden lg:table-cell">
-                                <Badge variant="outline">{user.quota || 0}</Badge>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex gap-1">
+                                
+                                <div className="space-y-2 mb-4">
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Email:</span>
+                                    <span className="font-mono">{user.email}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Quota:</span>
+                                    <Badge variant="outline">{user.quota || 0}</Badge>
+                                  </div>
+                                  <div className="flex justify-between text-sm items-center">
+                                    <span className="text-muted-foreground">Role:</span>
+                                    <Select
+                                      value={user.admin?.toString() || "0"}
+                                      onValueChange={(value) => handleUpdateUser(user.id, { admin: parseInt(value) })}
+                                    >
+                                      <SelectTrigger className="w-20 h-8">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="0">User</SelectItem>
+                                        <SelectItem value="1">Admin</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+                                
+                                <div className="flex gap-2">
                                   <Button
                                     variant="outline"
                                     size="sm"
@@ -1501,9 +1861,10 @@ export default function AdminDashboardPage() {
                                       setQuotaForm({ amount: 0, operation: 'add' });
                                       setQuotaDialog(true);
                                     }}
-                                    title="Update Quota"
+                                    className="flex-1"
                                   >
-                                    <Coins className="h-4 w-4" />
+                                    <Coins className="h-4 w-4 mr-1" />
+                                    Update Quota
                                   </Button>
                                   <Button
                                     variant="outline"
@@ -1512,17 +1873,22 @@ export default function AdminDashboardPage() {
                                       setSelectedUser(user);
                                       setDeleteUserDialog(true);
                                     }}
-                                    title="Delete User"
                                     className="text-destructive hover:text-destructive"
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </div>
-                              </TableCell>
-                            </TableRow>
+                              </CardContent>
+                            </Card>
                           ))}
-                        </TableBody>
-                      </Table>
+                        </div>
+                      </ScrollArea>
+                      <div className="md:hidden">{renderPagination(usersPage, (usersSearch ? users.filter(u =>
+                        (u.username?.toLowerCase().includes(usersSearch.toLowerCase())) ||
+                        (u.email?.toLowerCase().includes(usersSearch.toLowerCase())) ||
+                        (u.admin?.toString() === usersSearch.toLowerCase()) ||
+                        ((u.quota ?? 0).toString().includes(usersSearch))
+                      ).length : users.length), setUsersPage)}</div>
                     </div>
                   </CardContent>
                 </Card>
@@ -1532,66 +1898,181 @@ export default function AdminDashboardPage() {
             {/* Install Data Tab */}
             {activeTab === 'installs' && (
               <div className="space-y-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-foreground mb-2">Install Data</h2>
-                  <p className="text-xs md:text-sm text-muted-foreground">Manage Windows installation requests</p>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-foreground mb-2">Install Data</h2>
+                    <p className="text-xs md:text-sm text-muted-foreground">Manage Windows installation requests</p>
+                  </div>
+                  <div className="w-full md:w-auto">
+                    <div className="relative">
+                      <Input
+                        value={installsSearch}
+                        onChange={(e) => setInstallsSearch(e.target.value)}
+                        placeholder="Search installs..."
+                        className="pl-9 w-full md:w-64"
+                      />
+                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    </div>
+                  </div>
                 </div>
 
                 <Card>
                   <CardContent className="p-6">
-                    <div className="table-responsive">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-12">#</TableHead>
-                            <TableHead>User</TableHead>
-                            <TableHead>IP Address</TableHead>
-                            <TableHead className="hidden md:table-cell">Windows Version</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead className="hidden lg:table-cell">Created</TableHead>
-                            <TableHead>Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {installData.map((install, index) => (
-                            <TableRow key={install.id}>
-                              <TableCell className="font-medium">{index + 1}</TableCell>
-                              <TableCell>{install.username}</TableCell>
-                              <TableCell className="font-mono">{install.ip}</TableCell>
-                              <TableCell className="hidden md:table-cell">{getWindowsVersionName(install.win_ver)}</TableCell>
-                              <TableCell>{getStatusBadge(install.status)}</TableCell>
-                              <TableCell className="hidden lg:table-cell">{new Date(install.created_at).toLocaleDateString()}</TableCell>
-                              <TableCell>
+                    {/* Desktop Table View */}
+                    <div className="hidden md:block">
+                      <ScrollArea className="h-[440px]">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-12">#</TableHead>
+                              <TableHead>User</TableHead>
+                              <TableHead>IP Address</TableHead>
+                              <TableHead className="hidden md:table-cell">Windows Version</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead className="hidden lg:table-cell">Created</TableHead>
+                              <TableHead>Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {getPaginatedData(
+                              installsSearch ? installData.filter(i =>
+                                (i.username?.toLowerCase().includes(installsSearch.toLowerCase())) ||
+                                (i.ip?.toLowerCase().includes(installsSearch.toLowerCase())) ||
+                                (getWindowsVersionName(i.win_ver).toLowerCase().includes(installsSearch.toLowerCase())) ||
+                                (i.status?.toLowerCase().includes(installsSearch.toLowerCase()))
+                              ) : installData,
+                              installsPage
+                            ).map((install, index) => (
+                              <TableRow key={install.id}>
+                                <TableCell className="font-medium">{(installsPage - 1) * ITEMS_PER_PAGE + index + 1}</TableCell>
+                                <TableCell>{install.username}</TableCell>
+                                <TableCell className="font-mono">{install.ip}</TableCell>
+                                <TableCell className="hidden md:table-cell">{getWindowsVersionName(install.win_ver)}</TableCell>
+                                <TableCell>{getStatusBadge(install.status)}</TableCell>
+                                <TableCell className="hidden lg:table-cell">{new Date(install.created_at).toLocaleDateString()}</TableCell>
+                                <TableCell>
+                                  <div className="flex gap-2">
+                                    <Select
+                                      value={install.status}
+                                      onValueChange={(value) => handleUpdateInstallStatus(install.id, value)}
+                                    >
+                                      <SelectTrigger className="w-28">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="pending">Pending</SelectItem>
+                                        <SelectItem value="running">Running</SelectItem>
+                                        <SelectItem value="completed">Completed</SelectItem>
+                                        <SelectItem value="failed">Failed</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleDeleteInstallData(install.id)}
+                                      title="Delete Install Data"
+                                      className="text-destructive hover:text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </ScrollArea>
+                    </div>
+
+                    <div className="hidden md:block">{renderPagination(installsPage, (installsSearch ? installData.filter(i =>
+                      (i.username?.toLowerCase().includes(installsSearch.toLowerCase())) ||
+                      (i.ip?.toLowerCase().includes(installsSearch.toLowerCase())) ||
+                      (getWindowsVersionName(i.win_ver).toLowerCase().includes(installsSearch.toLowerCase())) ||
+                      (i.status?.toLowerCase().includes(installsSearch.toLowerCase()))
+                    ).length : installData.length), setInstallsPage)}</div>
+
+                    {/* Mobile Card View */}
+                    <div className="md:hidden">
+                      <ScrollArea className="h-[440px]">
+                        <div className="space-y-4">
+                          {getPaginatedData(
+                            installsSearch ? installData.filter(i =>
+                              (i.username?.toLowerCase().includes(installsSearch.toLowerCase())) ||
+                              (i.ip?.toLowerCase().includes(installsSearch.toLowerCase())) ||
+                              (getWindowsVersionName(i.win_ver).toLowerCase().includes(installsSearch.toLowerCase())) ||
+                              (i.status?.toLowerCase().includes(installsSearch.toLowerCase()))
+                            ) : installData,
+                            installsPage
+                          ).map((install, index) => (
+                            <Card key={install.id} className="hover:shadow-md transition-shadow">
+                              <CardContent className="p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="h-10 w-10 bg-purple-500/10 rounded-lg flex items-center justify-center">
+                                      <Database className="h-5 w-5 text-purple-600" />
+                                    </div>
+                                    <div>
+                                      <p className="font-medium">{install.username}</p>
+                                      <p className="text-sm text-muted-foreground">#{(installsPage - 1) * ITEMS_PER_PAGE + index + 1}</p>
+                                    </div>
+                                  </div>
+                                  {getStatusBadge(install.status)}
+                                </div>
+                                
+                                <div className="space-y-2 mb-4">
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">IP Address:</span>
+                                    <span className="font-mono">{install.ip}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Windows Version:</span>
+                                    <span className="text-xs">{getWindowsVersionName(install.win_ver)}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Created:</span>
+                                    <span className="text-xs">{new Date(install.created_at).toLocaleDateString()}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm items-center">
+                                    <span className="text-muted-foreground">Status:</span>
+                                    <Select
+                                      value={install.status}
+                                      onValueChange={(value) => handleUpdateInstallStatus(install.id, value)}
+                                    >
+                                      <SelectTrigger className="w-24 h-8">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="pending">Pending</SelectItem>
+                                        <SelectItem value="running">Running</SelectItem>
+                                        <SelectItem value="completed">Completed</SelectItem>
+                                        <SelectItem value="failed">Failed</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+                                
                                 <div className="flex gap-2">
-                                  <Select
-                                    value={install.status}
-                                    onValueChange={(value) => handleUpdateInstallStatus(install.id, value)}
-                                  >
-                                    <SelectTrigger className="w-28">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="pending">Pending</SelectItem>
-                                      <SelectItem value="running">Running</SelectItem>
-                                      <SelectItem value="completed">Completed</SelectItem>
-                                      <SelectItem value="failed">Failed</SelectItem>
-                                    </SelectContent>
-                                  </Select>
                                   <Button
                                     variant="outline"
                                     size="sm"
                                     onClick={() => handleDeleteInstallData(install.id)}
-                                    title="Delete Install Data"
-                                    className="text-destructive hover:text-destructive"
+                                    className="text-destructive hover:text-destructive flex-1"
                                   >
-                                    <Trash2 className="h-4 w-4" />
+                                    <Trash2 className="h-4 w-4 mr-1" />
+                                    Delete
                                   </Button>
                                 </div>
-                              </TableCell>
-                            </TableRow>
+                              </CardContent>
+                            </Card>
                           ))}
-                        </TableBody>
-                      </Table>
+                        </div>
+                      </ScrollArea>
+                      <div className="md:hidden">{renderPagination(installsPage, (installsSearch ? installData.filter(i =>
+                      (i.username?.toLowerCase().includes(installsSearch.toLowerCase())) ||
+                      (i.ip?.toLowerCase().includes(installsSearch.toLowerCase())) ||
+                      (getWindowsVersionName(i.win_ver).toLowerCase().includes(installsSearch.toLowerCase())) ||
+                      (i.status?.toLowerCase().includes(installsSearch.toLowerCase()))
+                    ).length : installData.length), setInstallsPage)}</div>
                     </div>
                   </CardContent>
                 </Card>
@@ -1634,91 +2115,7 @@ export default function AdminDashboardPage() {
 
                 <Card>
                   <CardContent className="p-6">
-                    <div className="table-responsive">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-12">#</TableHead>
-                            <TableHead>Code</TableHead>
-                            <TableHead>Name</TableHead>
-                            <TableHead className="hidden md:table-cell">Type</TableHead>
-                            <TableHead className="hidden lg:table-cell">Fee</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {paymentMethods.map((method, index) => (
-                            <TableRow key={method.code}>
-                              <TableCell className="font-medium">{index + 1}</TableCell>
-                              <TableCell className="font-mono">{method.code}</TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-3">
-                                  {method.icon_url && (
-                                    <img
-                                      src={method.icon_url}
-                                      alt={method.name}
-                                      className="w-6 h-6 object-contain"
-                                    />
-                                  )}
-                                  <span className="font-medium">{method.name}</span>
-                                </div>
-                              </TableCell>
-                              <TableCell className="hidden md:table-cell">
-                                <Badge variant="outline">{method.type}</Badge>
-                              </TableCell>
-                              <TableCell className="hidden lg:table-cell">
-                                <div className="text-sm">
-                                  <div>Flat: Rp {method.fee_flat?.toLocaleString() || 0}</div>
-                                  <div>Percent: {method.fee_percent || 0}%</div>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                {method.is_enabled ? (
-                                  <Badge variant="default" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                                    <CheckCircle className="w-3 h-3 mr-1" />
-                                    Enabled
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="destructive">
-                                    <AlertCircle className="w-3 h-3 mr-1" />
-                                    Disabled
-                                  </Badge>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  variant={method.is_enabled ? "destructive" : "default"}
-                                  size="sm"
-                                  onClick={async () => {
-                                    try {
-                                      await apiService.updatePaymentMethod(method.code, {
-                                        is_enabled: !method.is_enabled
-                                      });
-                                      toast({
-                                        title: 'Payment method updated',
-                                        description: `${method.name} has been ${method.is_enabled ? 'disabled' : 'enabled'}`,
-                                      });
-                                      await loadData();
-                                    } catch (error: any) {
-                                      toast({
-                                        variant: 'destructive',
-                                        title: 'Update failed',
-                                        description: error.response?.data?.message || 'Failed to update payment method',
-                                      });
-                                    }
-                                  }}
-                                >
-                                  {method.is_enabled ? 'Disable' : 'Enable'}
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                    
-                    {paymentMethods.length === 0 && (
+                    {paymentMethods.length === 0 ? (
                       <div className="text-center py-8">
                         <CreditCard className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                         <p className="text-lg font-medium text-muted-foreground mb-2">No payment methods found</p>
@@ -1726,6 +2123,179 @@ export default function AdminDashboardPage() {
                           Click "Sync from Tripay" to load payment methods from your Tripay account
                         </p>
                       </div>
+                    ) : (
+                      <>
+                        {/* Desktop Table View */}
+                        <div className="hidden md:block table-responsive">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-12">#</TableHead>
+                                <TableHead>Code</TableHead>
+                                <TableHead>Name</TableHead>
+                                <TableHead className="hidden md:table-cell">Type</TableHead>
+                                <TableHead className="hidden lg:table-cell">Fee</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {paymentMethods.map((method, index) => (
+                                <TableRow key={method.code}>
+                                  <TableCell className="font-medium">{index + 1}</TableCell>
+                                  <TableCell className="font-mono">{method.code}</TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center gap-3">
+                                      {method.icon_url && (
+                                        <img
+                                          src={method.icon_url}
+                                          alt={method.name}
+                                          className="w-6 h-6 object-contain"
+                                        />
+                                      )}
+                                      <span className="font-medium">{method.name}</span>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="hidden md:table-cell">
+                                    <Badge variant="outline">{method.type}</Badge>
+                                  </TableCell>
+                                  <TableCell className="hidden lg:table-cell">
+                                    <div className="text-sm">
+                                      <div>Flat: Rp {method.fee_flat?.toLocaleString() || 0}</div>
+                                      <div>Percent: {method.fee_percent || 0}%</div>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    {method.is_enabled ? (
+                                      <Badge variant="default" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                        <CheckCircle className="w-3 h-3 mr-1" />
+                                        Enabled
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="destructive">
+                                        <AlertCircle className="w-3 h-3 mr-1" />
+                                        Disabled
+                                      </Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Button
+                                      variant={method.is_enabled ? "destructive" : "default"}
+                                      size="sm"
+                                      onClick={async () => {
+                                        try {
+                                          await apiService.updatePaymentMethod(method.code, {
+                                            is_enabled: !method.is_enabled
+                                          });
+                                          toast({
+                                            title: 'Payment method updated',
+                                            description: `${method.name} has been ${method.is_enabled ? 'disabled' : 'enabled'}`,
+                                          });
+                                          await loadData();
+                                        } catch (error: any) {
+                                          toast({
+                                            variant: 'destructive',
+                                            title: 'Update failed',
+                                            description: error.response?.data?.message || 'Failed to update payment method',
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      {method.is_enabled ? 'Disable' : 'Enable'}
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+
+                        {/* Mobile Card View */}
+                        <div className="md:hidden space-y-4">
+                          {paymentMethods.map((method, index) => (
+                            <Card key={method.code} className="hover:shadow-md transition-shadow">
+                              <CardContent className="p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="h-10 w-10 bg-orange-500/10 rounded-lg flex items-center justify-center">
+                                      {method.icon_url ? (
+                                        <img
+                                          src={method.icon_url}
+                                          alt={method.name}
+                                          className="w-6 h-6 object-contain"
+                                        />
+                                      ) : (
+                                        <CreditCard className="h-5 w-5 text-orange-600" />
+                                      )}
+                                    </div>
+                                    <div>
+                                      <p className="font-medium">{method.name}</p>
+                                      <p className="text-sm text-muted-foreground">#{index + 1}</p>
+                                    </div>
+                                  </div>
+                                  {method.is_enabled ? (
+                                    <Badge variant="default" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                      <CheckCircle className="w-3 h-3 mr-1" />
+                                      Enabled
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="destructive">
+                                      <AlertCircle className="w-3 h-3 mr-1" />
+                                      Disabled
+                                    </Badge>
+                                  )}
+                                </div>
+                                
+                                <div className="space-y-2 mb-4">
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Code:</span>
+                                    <span className="font-mono">{method.code}</span>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Type:</span>
+                                    <Badge variant="outline">{method.type}</Badge>
+                                  </div>
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">Fee:</span>
+                                    <div className="text-xs text-right">
+                                      <div>Flat: Rp {method.fee_flat?.toLocaleString() || 0}</div>
+                                      <div>Percent: {method.fee_percent || 0}%</div>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant={method.is_enabled ? "destructive" : "default"}
+                                    size="sm"
+                                    onClick={async () => {
+                                      try {
+                                        await apiService.updatePaymentMethod(method.code, {
+                                          is_enabled: !method.is_enabled
+                                        });
+                                        toast({
+                                          title: 'Payment method updated',
+                                          description: `${method.name} has been ${method.is_enabled ? 'disabled' : 'enabled'}`,
+                                        });
+                                        await loadData();
+                                      } catch (error: any) {
+                                        toast({
+                                          variant: 'destructive',
+                                          title: 'Update failed',
+                                          description: error.response?.data?.message || 'Failed to update payment method',
+                                        });
+                                      }
+                                    }}
+                                    className="flex-1"
+                                  >
+                                    {method.is_enabled ? 'Disable' : 'Enable'}
+                                  </Button>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      </>
                     )}
                   </CardContent>
                 </Card>
@@ -1919,6 +2489,238 @@ export default function AdminDashboardPage() {
                     </CardContent>
                   </Card>
                 </div>
+              </div>
+            )}
+
+            {/* Admin 2FA Settings Tab */}
+            {activeTab === '2fa' && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-foreground mb-2">Admin Two-Factor Authentication</h2>
+                    <p className="text-xs md:text-sm text-muted-foreground">Secure your admin account with 2FA</p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {twoFactorStatus?.enabled ? (
+                      <Badge variant="default" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                        <Shield className="w-3 h-3 mr-1" />
+                        Enabled
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                        <AlertCircle className="w-3 h-3 mr-1" />
+                        Disabled
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center">
+                      <KeyRound className="w-5 h-5 mr-2" />
+                      Two-Factor Authentication Status
+                    </CardTitle>
+                    <CardDescription>
+                      {twoFactorStatus?.enabled 
+                        ? "Your admin account is protected with 2FA. You can disable it below if needed."
+                        : "Enable 2FA to add an extra layer of security to your admin account."
+                      }
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {!twoFactorStatus?.enabled ? (
+                      <>
+                        {!twoFactorSetup ? (
+                          <div className="text-center py-8">
+                            <Smartphone className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                            <h3 className="text-lg font-semibold mb-2">Set Up Two-Factor Authentication</h3>
+                            <p className="text-muted-foreground mb-4">
+                              Protect your admin account by requiring a verification code from your authenticator app.
+                            </p>
+                            <Button 
+                              onClick={handleSetup2FA}
+                              disabled={twoFactorLoading}
+                              className="w-full max-w-sm"
+                            >
+                              {twoFactorLoading ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                  Setting up...
+                                </>
+                              ) : (
+                                <>
+                                  <QrCode className="w-4 h-4 mr-2" />
+                                  Set Up 2FA
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            <div className="text-center">
+                              <h3 className="text-lg font-semibold mb-2">Scan QR Code</h3>
+                              <p className="text-muted-foreground mb-4">
+                                Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)
+                              </p>
+                              {showQRCode && twoFactorSetup && (
+                                twoFactorSetup.qrBase64 ? (
+                                  <img
+                                    src={twoFactorSetup.qrBase64}
+                                    alt="QR Code"
+                                    className="inline-block p-4 bg-white rounded-lg shadow-sm border"
+                                  />
+                                ) : twoFactorSetup.qrSvg ? (
+                                  <div 
+                                    className="inline-block p-4 bg-white rounded-lg shadow-sm border"
+                                    dangerouslySetInnerHTML={{ __html: twoFactorSetup.qrSvg }}
+                                  />
+                                ) : (
+                                  <div className="inline-block p-4 bg-muted rounded-lg border">
+                                    <p className="text-muted-foreground text-sm">QR Code not available</p>
+                                  </div>
+                                )
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowQRCode(!showQRCode)}
+                                className="mt-2"
+                              >
+                                {showQRCode ? 'Hide QR Code' : 'Show QR Code'}
+                              </Button>
+                            </div>
+
+                            <div className="bg-muted/50 p-4 rounded-lg">
+                              <h4 className="font-medium mb-2">Manual Setup</h4>
+                              <p className="text-sm text-muted-foreground mb-2">
+                                If you can't scan the QR code, enter this secret key manually:
+                              </p>
+                              <code className="block p-2 bg-background rounded border text-sm font-mono break-all">
+                                {twoFactorSetup?.secret}
+                              </code>
+                            </div>
+
+                            <div className="space-y-4">
+                              <div>
+                                <Label htmlFor="verification-code">Verification Code</Label>
+                                <p className="text-sm text-muted-foreground mb-2">
+                                  Enter the 6-digit code from your authenticator app to complete setup:
+                                </p>
+                                <div className="flex justify-center">
+                                  <InputOTP
+                                    maxLength={6}
+                                    value={twoFactorCode}
+                                    onChange={setTwoFactorCode}
+                                  >
+                                    <InputOTPGroup>
+                                      <InputOTPSlot index={0} />
+                                      <InputOTPSlot index={1} />
+                                      <InputOTPSlot index={2} />
+                                    </InputOTPGroup>
+                                    <InputOTPSeparator />
+                                    <InputOTPGroup>
+                                      <InputOTPSlot index={3} />
+                                      <InputOTPSlot index={4} />
+                                      <InputOTPSlot index={5} />
+                                    </InputOTPGroup>
+                                  </InputOTP>
+                                </div>
+                              </div>
+
+                              <div className="flex space-x-2">
+                                <Button
+                                  variant="outline"
+                                  onClick={() => {
+                                    setTwoFactorSetup(null);
+                                    setTwoFactorCode('');
+                                    setShowQRCode(false);
+                                  }}
+                                  className="flex-1"
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  onClick={handleEnable2FA}
+                                  disabled={twoFactorLoading || twoFactorCode.length !== 6}
+                                  className="flex-1"
+                                >
+                                  {twoFactorLoading ? (
+                                    <>
+                                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                      Enabling...
+                                    </>
+                                  ) : (
+                                    'Enable 2FA'
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-center py-8">
+                          <div className="text-center">
+                            <div className="w-16 h-16 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                              <Shield className="w-8 h-8 text-green-600 dark:text-green-400" />
+                            </div>
+                            <h3 className="text-lg font-semibold mb-2">2FA is Enabled</h3>
+                            <p className="text-muted-foreground">
+                              Your admin account is protected with two-factor authentication.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="border-t pt-4">
+                          <h4 className="font-medium mb-2 text-destructive">Disable Two-Factor Authentication</h4>
+                          <p className="text-sm text-muted-foreground mb-4">
+                            To disable 2FA, enter a verification code from your authenticator app:
+                          </p>
+                          
+                          <div className="space-y-4">
+                            <div className="flex justify-center">
+                              <InputOTP
+                                maxLength={6}
+                                value={twoFactorCode}
+                                onChange={setTwoFactorCode}
+                              >
+                                <InputOTPGroup>
+                                  <InputOTPSlot index={0} />
+                                  <InputOTPSlot index={1} />
+                                  <InputOTPSlot index={2} />
+                                </InputOTPGroup>
+                                <InputOTPSeparator />
+                                <InputOTPGroup>
+                                  <InputOTPSlot index={3} />
+                                  <InputOTPSlot index={4} />
+                                  <InputOTPSlot index={5} />
+                                </InputOTPGroup>
+                              </InputOTP>
+                            </div>
+
+                            <Button
+                              variant="destructive"
+                              onClick={handleDisable2FA}
+                              disabled={twoFactorLoading || twoFactorCode.length !== 6}
+                              className="w-full"
+                            >
+                              {twoFactorLoading ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                  Disabling...
+                                </>
+                              ) : (
+                                'Disable 2FA'
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
             )}
           </div>
@@ -2146,6 +2948,7 @@ export default function AdminDashboardPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </div>
   );
 }

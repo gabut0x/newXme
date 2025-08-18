@@ -135,6 +135,24 @@ async function createTables(): Promise<void> {
       logger.info('Adding telegram_display_name column to users table');
       await db.run('ALTER TABLE users ADD COLUMN telegram_display_name VARCHAR(255)');
     }
+
+    // Check if two_factor_enabled column exists, if not add it
+    try {
+      await db.get('SELECT two_factor_enabled FROM users LIMIT 1');
+    } catch (error) {
+      // Column doesn't exist, add it
+      logger.info('Adding two_factor_enabled column to users table');
+      await db.run('ALTER TABLE users ADD COLUMN two_factor_enabled BOOLEAN DEFAULT 0');
+    }
+
+    // Check if totp_secret column exists, if not add it
+    try {
+      await db.get('SELECT totp_secret FROM users LIMIT 1');
+    } catch (error) {
+      // Column doesn't exist, add it
+      logger.info('Adding totp_secret column to users table');
+      await db.run('ALTER TABLE users ADD COLUMN totp_secret VARCHAR(32)');
+    }
     
     // Email verification codes table
     await db.run(`
