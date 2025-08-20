@@ -9,7 +9,7 @@ export interface AppError extends Error {
   code?: string;
 }
 
-export function errorHandler(error: AppError, req: Request, res: Response, next: NextFunction): void {
+export function errorHandler(error: AppError, req: Request, res: Response, _next: NextFunction): void {
   // Log the error
   logger.error('Error occurred:', {
     message: error.message,
@@ -55,7 +55,7 @@ export function errorHandler(error: AppError, req: Request, res: Response, next:
   }
 
   // Don't expose internal errors in production
-  if (process.env.NODE_ENV === 'production' && statusCode === 500) {
+  if (process.env['NODE_ENV'] === 'production' && statusCode === 500) {
     message = 'Internal server error';
     errorCode = 'INTERNAL_ERROR';
   }
@@ -67,7 +67,7 @@ export function errorHandler(error: AppError, req: Request, res: Response, next:
   };
 
   // Add additional error details in development
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env['NODE_ENV'] === 'development') {
     response.data = {
       stack: error.stack,
       details: error.message

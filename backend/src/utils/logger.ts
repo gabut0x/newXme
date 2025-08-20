@@ -12,14 +12,12 @@ export class Logger {
   private logFile: string;
   private errorLogFile: string;
   private accessLogFile: string;
-  private isDevelopment: boolean;
 
   constructor() {
     this.logDir = path.join(__dirname, '../../logs');
     this.logFile = path.join(this.logDir, 'app.log');
     this.errorLogFile = path.join(this.logDir, 'error.log');
     this.accessLogFile = path.join(this.logDir, 'access.log');
-    this.isDevelopment = process.env.NODE_ENV === 'development';
     this.ensureLogDirectory();
   }
 
@@ -83,7 +81,7 @@ export class Logger {
   }
 
   debug(message: string, meta?: any): void {
-    if (process.env.NODE_ENV === 'development') {
+    if (process.env['NODE_ENV'] === 'development') {
       this.log('debug', message, meta);
     }
   }

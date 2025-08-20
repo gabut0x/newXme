@@ -226,9 +226,12 @@ export class BotSecurity {
     
     // Check global rate limit first
     if (!this.rateLimiter.checkLimit(globalIdentifier, RATE_LIMITS.GLOBAL_COMMANDS)) {
+      const globalBlockUntil = this.rateLimiter.getBlockUntil(globalIdentifier);
+      const globalResetTime = this.rateLimiter.getResetTime(globalIdentifier);
+      const globalUntil = globalBlockUntil ?? globalResetTime;
       return {
         allowed: false,
-        reason: 'Global rate limit exceeded. Please try again later.'
+        reason: `Global rate limit exceeded. Please try again ${globalUntil ? `at ${new Date(globalUntil).toLocaleTimeString()}` : 'later'}.`
       };
     }
     
@@ -254,10 +257,12 @@ export class BotSecurity {
         // Check if user should be temporarily blocked
         await this.handleSpamAttempt(context.userId, context.username || 'Unknown');
         
-        const resetTime = this.rateLimiter.getResetTime(spamIdentifier);
+        const spamBlockUntil = this.rateLimiter.getBlockUntil(spamIdentifier);
+        const spamResetTime = this.rateLimiter.getResetTime(spamIdentifier);
+        const spamUntil = spamBlockUntil ?? spamResetTime;
         return {
           allowed: false,
-          reason: `⚠️ Terlalu banyak percobaan. Akun Anda diblokir sementara. Silakan hubungkan akun Telegram Anda terlebih dahulu dengan /start, lalu coba lagi ${resetTime ? `pada ${new Date(resetTime).toLocaleTimeString()}` : 'nanti'}.`
+          reason: `⚠️ Terlalu banyak percobaan. Akun Anda diblokir sementara. Silakan hubungkan akun Telegram Anda terlebih dahulu dengan /start, lalu coba lagi ${spamUntil ? `pada ${new Date(spamUntil).toLocaleTimeString()}` : 'nanti'}.`
         };
       }
     } else {
@@ -270,10 +275,12 @@ export class BotSecurity {
     }
     
     if (!this.rateLimiter.checkLimit(userIdentifier, rateLimitConfig)) {
+      const blockUntil = this.rateLimiter.getBlockUntil(userIdentifier);
       const resetTime = this.rateLimiter.getResetTime(userIdentifier);
+      const until = blockUntil ?? resetTime;
       const message = !isUserConnected 
-        ? `⚠️ Rate limit terlampaui. Hubungkan akun Telegram Anda dengan /start untuk mendapatkan akses penuh. Coba lagi ${resetTime ? `pada ${new Date(resetTime).toLocaleTimeString()}` : 'nanti'}.`
-        : `Rate limit exceeded. Please try again ${resetTime ? `at ${new Date(resetTime).toLocaleTimeString()}` : 'later'}.`;
+        ? `⚠️ Rate limit terlampaui. Hubungkan akun Telegram Anda dengan /start untuk mendapatkan akses penuh. Coba lagi ${until ? `pada ${new Date(until).toLocaleTimeString()}` : 'nanti'}.`
+        : `Rate limit exceeded. Please try again ${until ? `at ${new Date(until).toLocaleTimeString()}` : 'later'}.`;
       
       return {
         allowed: false,
@@ -425,7 +432,6 @@ export class BotSecurity {
 
   private async getRecentCommands(userId: number, timeWindowMs: number): Promise<any[]> {
     try {
-      const db = this.initializeDb();
       const cutoffTime = DateUtils.addMinutesJakarta(-Math.floor(timeWindowMs / 60000));
       
       // This would query a bot_command_logs table if it exists
@@ -660,10 +666,7 @@ export class BotSecurity {
 
   private async handleSpamAttempt(userId: number, username: string): Promise<void> {
     try {
-      const db = this.initializeDb();
-      
       // Check if user has previous spam warnings
-      const warningKey = `spam_warning:${userId}`;
       const warningCount = await this.getSpamWarningCount(userId);
       
       if (warningCount >= 2) {
@@ -753,7 +756,6 @@ export class BotSecurity {
       };
       
       const cooldownSeconds = cooldownPeriods[command] || 5; // Default 5 seconds
-      const cooldownKey = `cooldown:${userId}:${command}`;
       
       // Check if command is in cooldown
       const lastUsed = await this.getLastCommandTime(userId, command);

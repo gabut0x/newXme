@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { logger } from './logger.js';
 
 /**
  * Enhanced validation utilities with security focus
@@ -32,7 +31,7 @@ export class ValidationUtils {
 
     // Check for suspicious patterns
     const suspiciousPatterns = [
-      /\.\./,  // Double dots
+      /\.{2}/,  // Double dots
       /^\./, // Starting with dot
       /\.$/, // Ending with dot
       /@.*@/, // Multiple @ symbols

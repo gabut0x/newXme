@@ -73,9 +73,13 @@ export class DatabaseSecurity {
   /**
    * Validate ORDER BY clause to prevent injection
    */
-  static validateOrderBy(orderBy: string): string {
-    const parts = orderBy.split(/\s+/);
-    const column = parts[0];
+  static validateOrderBy(orderBy?: string): string {
+    const trimmed = (orderBy || '').trim();
+    if (!trimmed) {
+      throw new Error('ORDER BY clause cannot be empty');
+    }
+    const parts = trimmed.split(/\s+/);
+    const column: string = parts[0] ?? '';
     const direction = parts[1]?.toUpperCase();
 
     if (!this.validateIdentifier(column)) {

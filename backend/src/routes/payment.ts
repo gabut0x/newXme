@@ -6,7 +6,7 @@ import { logger } from '../utils/logger.js';
 const router = express.Router();
 
 // Get payment channels
-router.get('/channels', async (req: Request, res: Response) => {
+router.get('/channels', async (_req: Request, res: Response) => {
   try {
     const channels = await tripayService.getPaymentChannels();
     res.json({

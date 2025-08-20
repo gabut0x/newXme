@@ -5,7 +5,7 @@ import { UserService } from '../services/userService.js';
 import { RateLimiter } from '../config/redis.js';
 import { logger } from '../utils/logger.js';
 import { ApiResponse } from '../types/user.js';
-import { DateUtils } from '../utils/dateUtils.js';
+// import { DateUtils } from '../utils/dateUtils.js';
 
 // ========================
 // Express Request Augment
@@ -397,7 +397,7 @@ export function asyncHandler(fn: Function) {
 }
 
 // IDOR protection
-export function requireResourceOwnership(resourceIdParam: string = 'id', userIdField: string = 'user_id') {
+export function requireResourceOwnership(resourceIdParam: string = 'id') {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       if (!req.user) {
@@ -462,7 +462,7 @@ export function sqlInjectionProtection(req: Request, res: Response, next: NextFu
     /(\b(or|and)\b.*=.*\b(or|and)\b.*=)/i,
     /('.*'.*=.*'.*')/,
     /(0x[0-9a-f]+.*=)/i,
-    /(\bchar\b|\bcast\b|\bconvert\b).*\(/i
+    /(\bchar\b|\bconvert\b).*\(/i
   ];
 
   const checkForSqlInjection = (obj: any, path: string = ''): boolean => {

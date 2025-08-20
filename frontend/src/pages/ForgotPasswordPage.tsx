@@ -116,7 +116,7 @@ export default function ForgotPasswordPage() {
                     <div className="p-4 bg-muted/50 rounded-lg">
                       <Mail className="h-8 w-8 text-primary mx-auto mb-2" />
                       <p className="text-sm text-muted-foreground">
-                        Click the link in the email to reset your password. The link will expire in 15 minutes.
+                        Click the link in the email to reset your password. The link will expire in 30 minutes.
                       </p>
                     </div>
 

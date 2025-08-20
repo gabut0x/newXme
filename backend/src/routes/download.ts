@@ -29,7 +29,7 @@ const BLOCKED_USER_AGENTS_PATTERN = /bot|crawler|spider|scraper|facebook|twitter
  * Handle protected download requests
  */
 router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbGxhdGlvbi55b3Uuc2hvbGRudC5zZWUudGhpcw/:filename',
-  async (req: Request, res: Response) => {
+  async (req: Request, res: Response): Promise<void> => {
     try {
       const { region, filename } = req.params;
       const signature = req.query['sig'] as string;
@@ -43,25 +43,29 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbG
       // Validate required parameters
       if (!region || !filename || !signature) {
         logger.warn('Missing required parameters:', { region, filename, signature: !!signature, ip });
-        return res.status(400).send('Missing required parameters');
+        res.status(400).send('Missing required parameters');
+        return;
       }
 
       // Validate User-Agent
       if (BLOCKED_USER_AGENTS_PATTERN.test(userAgent)) {
         logger.warn('Blocked user agent attempt:', { ip, userAgent, filename });
-        return res.status(403).send('Access denied');
+        res.status(403).send('Access denied');
+        return;
       }
 
       if (!ALLOWED_USER_AGENTS.some(agent => userAgent.toLowerCase().includes(agent))) {
         logger.warn('Invalid user agent:', { ip, userAgent, filename });
-        return res.status(403).send('Access denied');
+        res.status(403).send('Access denied');
+        return;
       }
 
       // Validate signature
       const signatureResult = InstallService.validateSignature(ip, filename, signature);
       if (!signatureResult.isValid || !signatureResult.installId) {
         logger.warn('Invalid signature:', { ip, filename, signature });
-        return res.status(403).send('Access denied');
+        res.status(403).send('Access denied');
+        return;
       }
 
       const installId = signatureResult.installId;
@@ -69,13 +73,15 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbG
       // Validate file extension
       if (!filename.endsWith('.gz')) {
         logger.warn('Invalid file extension:', { ip, filename });
-        return res.status(400).send('Invalid file type');
+        res.status(400).send('Invalid file type');
+        return;
       }
 
       // Validate region
       if (!BASE_URLS[region as keyof typeof BASE_URLS]) {
         logger.warn('Unsupported region:', { region, ip, filename });
-        return res.status(404).send('Region not supported');
+        res.status(404).send('Region not supported');
+        return;
       }
 
       // Write to log file
@@ -128,7 +134,7 @@ router.get('/download/:region/YXNpYS5sb2NhdGlvbi50by5zdG9yZS5maWxlLmd6Lmluc3RhbG
 /**
  * Public root script endpoint
  */
-router.get('/root', (req: Request, res: Response) => {
+router.get('/root', (_req: Request, res: Response): void => {
   try {
     // Shell script with proper escaping
     const script = `#!/bin/bash
@@ -181,10 +187,10 @@ sudo systemctl restart sshd || sudo service ssh restart
 GREEN='\\033[0;32m'
 NC='\\033[0m' # Reset color
 
-echo -e "\${GREEN}# Root Access Granted (\${CLOUD_VENDOR})\${NC}"
-echo -e "user : \${GREEN}root\${NC}"
-echo -e "pass : \${GREEN}\${ROOT_PASS}\${NC}"
-echo -e "\${GREEN}#========================\${NC}"
+echo -e "\\$\\{GREEN\\}# Root Access Granted (\\$\\{CLOUD_VENDOR\\})\\$\\{NC\\}"
+echo -e "user : \\$\\{GREEN\\}root\\$\\{NC\\}"
+echo -e "pass : \\$\\{GREEN\\}\\$\\{ROOT_PASS\\}\\$\\{NC\\}"
+echo -e "\\$\\{GREEN\\}#========================\\$\\{NC\\}"
 `;
 
     res.setHeader('Content-Type', 'text/plain');

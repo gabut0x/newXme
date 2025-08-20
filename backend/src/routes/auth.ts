@@ -1,534 +1,402 @@
-// Third-party packages
 import express from 'express';
+import { z } from 'zod';
+import { getDatabase } from '../database/init.js';
+import { DateUtils } from '../utils/dateUtils.js';
+import bcrypt from 'bcryptjs';
+// import jwt from 'jsonwebtoken'; // removed: using AuthUtils instead
+import { validateRequest, asyncHandler, authenticateToken } from '../middleware/auth.js';
 import { Request, Response } from 'express';
-
-// Custom middleware
-import {
-  authenticateToken,
-  requireUnverifiedUser,
-  loginRateLimit,
-  registerRateLimit,
-  forgotPasswordRateLimit,
-  verifyEmailRateLimit,
-  resendVerificationRateLimit,
-  validateRequest,
-  asyncHandler
-} from '../middleware/auth.js';
-import { verifyRecaptcha } from '../middleware/recaptcha.js';
-import { BadRequestError, UnauthorizedError } from '../middleware/errorHandler.js';
-
-// Types and schemas
-import {
-  registerSchema,
-  loginSchema,
-  forgotPasswordSchema,
-  resetPasswordSchema,
-  verifyEmailSchema,
-  ApiResponse,
-  verify2FASchema
-} from '../types/user.js';
-
-// Services and utilities
-import { UserService } from '../services/userService.js';
-import { emailService } from '../services/emailService.js';
-import { SessionManager } from '../config/redis.js';
 import { AuthUtils } from '../utils/auth.js';
-import { logger } from '../utils/logger.js';
-import { authenticator } from 'otplib';
 
 const router = express.Router();
 
-// Register new user
-router.post('/register', 
-  registerRateLimit,
-  verifyRecaptcha,
-  validateRequest(registerSchema),
-  asyncHandler(async (req: Request, res: Response) => {
-    const { username, email, password } = req.body;
+router.post('/register', validateRequest(z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  username: z.string().min(3)
+})), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const db = getDatabase();
+  const { email, password, username } = req.body;
 
-    // Create user
-    const user = await UserService.createUser({
-      username: AuthUtils.sanitizeInput(username),
-      email: email.toLowerCase(),
-      password
-    });
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const now = DateUtils.nowSQLite();
 
-    // Generate verification code
-    const verificationCode = await UserService.createVerificationCode(user.id, 'email_verification');
+  const result = await db.run(
+    'INSERT INTO users (email, username, password_hash, created_at, updated_at, is_verified, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [email, username, hashedPassword, now, now, false, true]
+  );
 
-    // Send verification email
-    try {
-      await emailService.sendVerificationEmail(user.email, {
+  // Create verification code
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const expirationMinutes = parseInt(process.env['VERIFICATION_CODE_EXPIRES_MINUTES'] || '15');
+  const expiresAt = DateUtils.addMinutesJakarta(expirationMinutes);
+
+  await db.run(
+    'INSERT INTO verification_codes (user_id, code, type, expires_at, created_at) VALUES (?, ?, ?, ?, ?)',
+    [result.lastID, code, 'email_verification', expiresAt, now]
+  );
+
+  // Send verification email
+  const { getEmailService } = await import('../services/emailService.js');
+  const emailService = getEmailService();
+  await emailService.sendVerificationEmail({
+    to: email,
+    subject: 'Email Verification - XME Projects',
+    code
+  });
+
+  res.json({ success: true, message: 'User registered successfully. Verification email sent.', data: { requiresVerification: true } });
+}));
+
+// Updated login to support username OR email
+router.post('/login', validateRequest(z.object({
+  username: z.string().min(1, 'Username or email is required').optional(),
+  email: z.string().email('Invalid email format').optional(),
+  password: z.string().min(1, 'Password is required'),
+  recaptchaToken: z.string().optional()
+}).refine((data) => !!data.username || !!data.email, {
+  message: 'Username or email is required',
+  path: ['username']
+})), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const db = getDatabase();
+  const { username, email, password } = req.body as { username?: string; email?: string; password: string };
+
+  // Treat provided `username` or `email` as identifier
+  const identifier = (username ?? email ?? '').trim();
+  if (!identifier) {
+    res.status(400).json({ success: false, message: 'Username or email is required' });
+    return;
+  }
+
+  const user = await db.get('SELECT * FROM users WHERE email = ? OR username = ?', [identifier, identifier]);
+  if (!user) {
+    res.status(401).json({ success: false, message: 'Invalid credentials' });
+    return;
+  }
+
+  const isValid = await bcrypt.compare(password, user.password_hash);
+  if (!isValid) {
+    res.status(401).json({ success: false, message: 'Invalid credentials' });
+    return;
+  }
+
+  const accessToken = AuthUtils.generateAccessToken({
+    userId: user.id,
+    username: user.username,
+    email: user.email,
+    isVerified: !!user.is_verified,
+  });
+
+  const sessionId = AuthUtils.generateSessionToken();
+
+  res.json({
+    success: true,
+    message: 'Login successful',
+    data: {
+      user: {
+        id: user.id,
         username: user.username,
-        code: verificationCode,
-        expirationMinutes: parseInt(process.env.VERIFICATION_CODE_EXPIRES_MINUTES || '15')
-      });
-    } catch (error) {
-      logger.error('Failed to send verification email:', error);
-      // Don't fail registration if email fails
+        email: user.email,
+        is_verified: user.is_verified,
+        admin: user.admin,
+        created_at: user.created_at,
+        last_login: user.last_login
+      },
+      accessToken,
+      sessionId,
+      requiresVerification: false,
+      twoFactorRequired: false
     }
+  });
+}));
 
-    // Generate tokens
-    const tokenPayload = {
-      userId: user.id,
-      username: user.username,
-      email: user.email,
-      isVerified: user.is_verified
-    };
+router.post('/verification-code', asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const db = getDatabase();
+  const { email } = req.body;
 
-    const accessToken = AuthUtils.generateAccessToken(tokenPayload);
-    const refreshToken = AuthUtils.generateRefreshToken(tokenPayload);
+  // Find user by email
+  const user = await db.get('SELECT id FROM users WHERE email = ?', [email]);
+  if (!user) {
+    res.status(404).json({ success: false, message: 'User not found' });
+    return;
+  }
 
-    // Create session
-    const sessionId = await SessionManager.createSession(user.id, {
-      userId: user.id,
-      username: user.username,
-      email: user.email,
-      isVerified: user.is_verified,
-      createdAt: new Date().toISOString()
-    });
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const expirationMinutes = parseInt(process.env['VERIFICATION_CODE_EXPIRES_MINUTES'] || '15');
+  const expiresAt = DateUtils.addMinutesJakarta(expirationMinutes);
 
-    // Set refresh token as httpOnly cookie
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    });
+  await db.run(
+    'INSERT INTO verification_codes (user_id, code, type, expires_at) VALUES (?, ?, ?, ?)',
+    [user.id, code, 'email_verification', expiresAt]
+  );
 
-    logger.info('User registered successfully:', {
-      userId: user.id,
-      username: user.username,
-      email: user.email
-    });
+  res.json({ success: true, message: 'Verification code sent' });
+}));
 
-    res.status(201).json({
-      success: true,
-      message: 'User registered successfully. Please check your email for verification code.',
-      data: {
-        user: await UserService.getPublicUserData(user.id),
-        accessToken,
-        sessionId,
-        requiresVerification: !user.is_verified
-      }
-    } as ApiResponse);
-  })
-);
+router.post('/verify-email', validateRequest(z.object({
+  code: z.string().length(6, 'Verification code must be 6 digits')
+})), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const { code } = req.body;
+  const db = getDatabase();
 
-// Login user
-router.post('/login',
-  loginRateLimit,
-  verifyRecaptcha,
-  validateRequest(loginSchema),
-  asyncHandler(async (req: Request, res: Response) => {
-    const { username, password } = req.body;
+  // Find valid verification code
+  const verification = await db.get(`
+    SELECT vc.*, u.* FROM verification_codes vc
+    JOIN users u ON vc.user_id = u.id
+    WHERE vc.code = ? AND vc.type = 'email_verification' AND vc.used_at IS NULL
+  `, [code]);
 
-    // Get user by username or email
-    let user = await UserService.getUserByUsername(username);
-    if (!user) {
-      user = await UserService.getUserByEmail(username);
-    }
+  if (!verification) {
+    res.status(400).json({ success: false, message: 'Invalid or expired verification code' });
+    return;
+  }
 
-    if (!user) {
-      throw new UnauthorizedError('Invalid credentials', 'INVALID_CREDENTIALS');
-    }
+  // Check if code has expired
+  if (DateUtils.isPast(verification.expires_at)) {
+    res.status(400).json({ success: false, message: 'Verification code has expired' });
+    return;
+  }
 
-    // Check if user is locked
-    const isLocked = await UserService.isUserLocked(user.id);
-    if (isLocked) {
-      throw new UnauthorizedError('Account is temporarily locked due to multiple failed login attempts', 'ACCOUNT_LOCKED');
-    }
+  // Mark code as used
+  await db.run('UPDATE verification_codes SET used_at = ? WHERE id = ?', [
+    DateUtils.nowSQLite(),
+    verification.id
+  ]);
 
-    // Verify password
-    const isValidPassword = await UserService.verifyPassword(user.id, password);
-    if (!isValidPassword) {
-      await UserService.incrementFailedLoginAttempts(user.id);
-      throw new UnauthorizedError('Invalid credentials', 'INVALID_CREDENTIALS');
-    }
+  // Mark user as verified
+  await db.run('UPDATE users SET is_verified = ?, updated_at = ? WHERE id = ?', [
+    true,
+    DateUtils.nowSQLite(),
+    verification.user_id
+  ]);
 
-    // Reset failed login attempts on successful login
-    await UserService.resetFailedLoginAttempts(user.id);
+  // Get updated user
+  const user = await db.get('SELECT * FROM users WHERE id = ?', [verification.user_id]);
 
-    // If admin with 2FA enabled, interrupt login and issue challenge
-    const requiresTwoFA = Boolean(user.admin) && (user.two_factor_enabled === true || user.two_factor_enabled === 1) && !!user.totp_secret;
-    if (requiresTwoFA) {
-      const challengeId = await SessionManager.createTwoFAChallenge(user.id, 300); // 5 minutes
-      logger.info('2FA challenge created for user:', { userId: user.id, challengeId });
-      return res.json({
-        success: true,
-        message: 'Two-factor authentication required',
-        data: {
-          twoFactorRequired: true,
-          challengeId
-        }
-      } as ApiResponse);
-    }
-
-    // Generate tokens
-    const tokenPayload = {
-      userId: user.id,
-      username: user.username,
-      email: user.email,
-      isVerified: user.is_verified
-    };
-
-    const accessToken = AuthUtils.generateAccessToken(tokenPayload);
-    const refreshToken = AuthUtils.generateRefreshToken(tokenPayload);
-
-    // Create session
-    const sessionId = await SessionManager.createSession(user.id, {
-      userId: user.id,
-      username: user.username,
-      email: user.email,
-      isVerified: user.is_verified,
-      createdAt: new Date().toISOString()
-    });
-
-    // Set refresh token as httpOnly cookie
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    });
-
-    logger.info('User logged in successfully:', {
-      userId: user.id,
-      username: user.username
-    });
-
-    res.json({
-      success: true,
-      message: 'Login successful',
-      data: {
-        user: await UserService.getPublicUserData(user.id),
-        accessToken,
-        sessionId,
-        requiresVerification: !user.is_verified
-      }
-    } as ApiResponse);
-  })
-);
-
-// Logout user
-router.post('/logout',
-  authenticateToken,
-  asyncHandler(async (req: Request, res: Response) => {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
-
-    if (token) {
-      // Blacklist the access token
-      await AuthUtils.blacklistToken(token);
-    }
-
-    // Clear refresh token cookie
-    res.clearCookie('refreshToken');
-
-    // Delete all user sessions (optional - for logout from all devices)
-    if (req.user) {
-      await SessionManager.deleteAllUserSessions(req.user.id);
-    }
-
-    logger.info('User logged out successfully:', {
-      userId: req.user?.id
-    });
-
-    res.json({
-      success: true,
-      message: 'Logout successful'
-    } as ApiResponse);
-  })
-);
-
-// Refresh access token
-router.post('/refresh',
-  asyncHandler(async (req: Request, res: Response) => {
-    const refreshToken = req.cookies.refreshToken;
-
-    if (!refreshToken) {
-      throw new UnauthorizedError('Refresh token required', 'MISSING_REFRESH_TOKEN');
-    }
-
-    // Check if token is blacklisted
-    const isBlacklisted = await AuthUtils.isTokenBlacklisted(refreshToken);
-    if (isBlacklisted) {
-      res.clearCookie('refreshToken');
-      throw new UnauthorizedError('Refresh token has been revoked', 'TOKEN_REVOKED');
-    }
-
-    // Verify refresh token
-    const decoded = AuthUtils.verifyToken(refreshToken);
-
-    // Get user to ensure they still exist and are active
-    const user = await UserService.getUserById(decoded.userId);
-    if (!user || !user.is_active) {
-      res.clearCookie('refreshToken');
-      throw new UnauthorizedError('User not found or inactive', 'USER_INACTIVE');
-    }
-
-    // Generate new access token
-    const tokenPayload = {
-      userId: user.id,
-      username: user.username,
-      email: user.email,
-      isVerified: user.is_verified
-    };
-
-    const newAccessToken = AuthUtils.generateAccessToken(tokenPayload);
-
-    res.json({
-      success: true,
-      message: 'Token refreshed successfully',
-      data: {
-        accessToken: newAccessToken,
-        user: await UserService.getPublicUserData(user.id)
-      }
-    } as ApiResponse);
-  })
-);
-
-// Verify email
-router.post('/verify-email',
-  authenticateToken,
-  requireUnverifiedUser,
-  verifyEmailRateLimit,
-  validateRequest(verifyEmailSchema),
-  asyncHandler(async (req: Request, res: Response) => {
-    const { code } = req.body;
-
-    const user = await UserService.verifyCode(code, 'email_verification');
-    if (!user) {
-      throw new BadRequestError('Invalid or expired verification code', 'INVALID_CODE');
-    }
-
-    // Send welcome email
-    try {
-      await emailService.sendWelcomeEmail(user.email, user.username);
-    } catch (error) {
-      logger.error('Failed to send welcome email:', error);
-      // Don't fail verification if email fails
-    }
-
-    logger.info('Email verified successfully:', {
-      userId: user.id,
-      email: user.email
-    });
-
-    res.json({
-      success: true,
-      message: 'Email verified successfully',
-      data: {
-        user: await UserService.getPublicUserData(user.id)
-      }
-    } as ApiResponse);
-  })
-);
-
-// Resend verification email
-router.post('/resend-verification',
-  authenticateToken,
-  requireUnverifiedUser,
-  resendVerificationRateLimit,
-  asyncHandler(async (req: Request, res: Response) => {
-    if (!req.user) {
-      throw new UnauthorizedError('Authentication required');
-    }
-
-    // Generate new verification code
-    const verificationCode = await UserService.createVerificationCode(req.user.id, 'email_verification');
-
-    // Send verification email
-    await emailService.sendVerificationEmail(req.user.email, {
-      username: req.user.username,
-      code: verificationCode,
-      expirationMinutes: parseInt(process.env.VERIFICATION_CODE_EXPIRES_MINUTES || '15')
-    });
-
-    logger.info('Verification email resent:', {
-      userId: req.user.id,
-      email: req.user.email
-    });
-
-    res.json({
-      success: true,
-      message: 'Verification email sent successfully'
-    } as ApiResponse);
-  })
-);
-
-// Forgot password
-router.post('/forgot-password',
-  forgotPasswordRateLimit,
-  verifyRecaptcha,
-  validateRequest(forgotPasswordSchema),
-  asyncHandler(async (req: Request, res: Response) => {
-    const { email } = req.body;
-
-    const user = await UserService.getUserByEmail(email.toLowerCase());
-    if (!user) {
-      // Return error if email is not found in database
-      throw new BadRequestError('Email address not found. Please check your email or register for a new account.', 'EMAIL_NOT_FOUND');
-    }
-
-    // Generate password reset token instead of code
-    const resetToken = AuthUtils.generatePasswordResetToken(user.id, user.email);
-
-    // Send password reset email
-    try {
-      await emailService.sendPasswordResetEmail(user.email, {
+  // Generate access token for immediate authentication after verification
+  const accessToken = AuthUtils.generateAccessToken({
+    userId: user.id,
+    username: user.username,
+    email: user.email,
+    isVerified: !!user.is_verified,
+  });
+  
+  res.json({ 
+    success: true, 
+    message: 'Email verified successfully',
+    data: { 
+      user: {
+        id: user.id,
         username: user.username,
-        code: resetToken, // Using token as code for email template
-        expirationMinutes: parseInt(process.env.VERIFICATION_CODE_EXPIRES_MINUTES || '15')
-      });
-    } catch (error) {
-      logger.error('Failed to send password reset email:', error);
-      throw new Error('Failed to send password reset email');
+        email: user.email,
+        is_verified: user.is_verified,
+        admin: user.admin,
+        created_at: user.created_at
+      },
+      accessToken
     }
+  });
+}));
 
-    logger.info('Password reset email sent:', {
-      userId: user.id,
-      email: user.email
-    });
+router.post('/resend-verification', validateRequest(z.object({
+  email: z.string().email().optional()
+})), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const db = getDatabase();
+  let { email } = req.body;
 
-    res.json({
-      success: true,
-      message: 'If an account with that email exists, a password reset code has been sent.'
-    } as ApiResponse);
-  })
-);
+  // If no email provided and user is authenticated, use their email
+  if (!email && (req as any).user) {
+    email = (req as any).user.email;
+  }
 
-// Validate reset token
-router.get('/validate-reset-token/:token',
-  asyncHandler(async (req: Request, res: Response) => {
-    const { token } = req.params;
+  if (!email) {
+    res.status(400).json({ success: false, message: 'Email is required' });
+    return;
+  }
 
-    const decoded = AuthUtils.verifyPasswordResetToken(token);
-    if (!decoded) {
-      throw new BadRequestError('Invalid or expired reset token', 'INVALID_TOKEN');
-    }
+  // Find user by email
+  const user = await db.get('SELECT id, username FROM users WHERE email = ?', [email]);
+  if (!user) {
+    res.status(404).json({ success: false, message: 'User not found' });
+    return;
+  }
 
-    // Verify user still exists
-    const user = await UserService.getUserById(decoded.userId);
-    if (!user) {
-      throw new BadRequestError('User not found', 'USER_NOT_FOUND');
-    }
+  // Delete any existing codes for this user
+  await db.run('DELETE FROM verification_codes WHERE user_id = ? AND type = ?', [user.id, 'email_verification']);
 
-    res.json({
-      success: true,
-      message: 'Reset token is valid',
-      data: {
-        email: decoded.email,
-        username: user.username
-      }
-    } as ApiResponse);
-  })
-);
+  // Generate new code
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const expirationMinutes = parseInt(process.env['VERIFICATION_CODE_EXPIRES_MINUTES'] || '15');
+  const expiresAt = DateUtils.addMinutesJakarta(expirationMinutes);
 
-// Reset password
-router.post('/reset-password',
-  validateRequest(resetPasswordSchema),
-  asyncHandler(async (req: Request, res: Response) => {
-    const { token, newPassword } = req.body;
+  await db.run(`
+    INSERT INTO verification_codes (user_id, code, type, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `, [user.id, code, 'email_verification', expiresAt, DateUtils.nowSQLite()]);
 
-    // Verify the reset token
-    const decoded = AuthUtils.verifyPasswordResetToken(token);
-    if (!decoded) {
-      throw new BadRequestError('Invalid or expired reset token', 'INVALID_TOKEN');
-    }
+  // Send verification email
+  const { getEmailService } = await import('../services/emailService.js');
+  const emailService = getEmailService();
+  
+  await emailService.sendVerificationEmail({
+    to: email,
+    subject: 'Email Verification - XME Projects',
+    code: code
+  });
 
-    // Verify user still exists
-    const user = await UserService.getUserById(decoded.userId);
-    if (!user) {
-      throw new BadRequestError('User not found', 'USER_NOT_FOUND');
-    }
+  res.json({ success: true, message: 'Verification email sent' });
+}));
 
-    // Update password
-    await UserService.updatePassword(user.id, newPassword);
+// New: Logout endpoint to blacklist the current access token
+router.post('/logout', authenticateToken, asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.split(' ')[1];
 
-    // Invalidate all existing sessions for this user
-    await SessionManager.deleteAllUserSessions(user.id);
+  if (token) {
+    await AuthUtils.blacklistToken(token);
+  }
 
-    logger.info('Password reset successfully:', {
-      userId: user.id,
-      email: user.email
-    });
+  res.json({ success: true, message: 'Logged out successfully' });
+}));
 
-    res.json({
-      success: true,
-      message: 'Password reset successfully. Please log in with your new password.'
-    } as ApiResponse);
-  })
-);
+router.post('/forgot-password', validateRequest(z.object({
+  email: z.string().email()
+})), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const db = getDatabase();
+  const { email } = req.body;
 
-// 2FA verify endpoint
-router.post('/2fa/verify',
-  validateRequest(verify2FASchema),
-  asyncHandler(async (req: Request, res: Response) => {
-    const { challengeId, code } = req.body;
+  // Find user by email
+  const user = await db.get('SELECT id, username FROM users WHERE email = ?', [email]);
+  if (!user) {
+    // Don't reveal if email exists or not for security
+    res.json({ success: true, message: 'If the email exists, a password reset link has been sent.' });
+    return;
+  }
 
-    const challenge = await SessionManager.getTwoFAChallenge(challengeId);
-    if (!challenge) {
-      throw new UnauthorizedError('Invalid or expired 2FA challenge', 'INVALID_CHALLENGE');
-    }
+  // Delete any existing password reset codes for this user
+  await db.run('DELETE FROM verification_codes WHERE user_id = ? AND type = ?', [user.id, 'password_reset']);
 
-    const user = await UserService.getUserById(challenge.userId);
-    if (!user) {
-      await SessionManager.deleteTwoFAChallenge(challengeId);
-      throw new UnauthorizedError('User not found', 'USER_NOT_FOUND');
-    }
+  // Generate reset token (JWT)
+  const resetToken = AuthUtils.generatePasswordResetToken(user.id, email);
+  const expirationMinutes = parseInt(process.env['PASSWORD_RESET_EXPIRES_MINUTES'] || '30');
+  const expiresAt = DateUtils.addMinutesJakarta(expirationMinutes);
+  const now = DateUtils.nowSQLite();
 
-    if (!user.totp_secret) {
-      await SessionManager.deleteTwoFAChallenge(challengeId);
-      throw new UnauthorizedError('2FA not configured for this user', 'TWOFA_NOT_CONFIGURED');
-    }
+  // Store token in database for additional validation
+  await db.run(
+    'INSERT INTO verification_codes (user_id, code, type, expires_at, created_at) VALUES (?, ?, ?, ?, ?)',
+    [user.id, resetToken, 'password_reset', expiresAt, now]
+  );
 
-    const isValid = authenticator.verify({ token: code, secret: user.totp_secret });
-    if (!isValid) {
-      throw new UnauthorizedError('Invalid 2FA code', 'INVALID_CODE');
-    }
+  // Send password reset email
+  const { getEmailService } = await import('../services/emailService.js');
+  const emailService = getEmailService();
+  await emailService.sendPasswordResetEmail({
+    to: email,
+    subject: 'Password Reset - XME Projects',
+    token: resetToken
+  });
 
-    // Valid - complete login
-    await SessionManager.deleteTwoFAChallenge(challengeId);
+  res.json({ success: true, message: 'If the email exists, a password reset link has been sent.' });
+}));
 
-    const tokenPayload = {
-      userId: user.id,
-      username: user.username,
-      email: user.email,
-      isVerified: user.is_verified
-    };
+router.post('/reset-password', validateRequest(z.object({
+  token: z.string().min(1, 'Reset token is required'),
+  newPassword: z.string().min(8, 'Password must be at least 8 characters')
+})), asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const { token, newPassword } = req.body;
+  const db = getDatabase();
 
-    const accessToken = AuthUtils.generateAccessToken(tokenPayload);
-    const refreshToken = AuthUtils.generateRefreshToken(tokenPayload);
+  // Verify JWT token
+  const tokenData = AuthUtils.verifyPasswordResetToken(token);
+  if (!tokenData) {
+    res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
+    return;
+  }
 
-    const sessionId = await SessionManager.createSession(user.id, {
-      userId: user.id,
-      username: user.username,
-      email: user.email,
-      isVerified: user.is_verified,
-      createdAt: new Date().toISOString()
-    });
+  // Find valid reset token in database
+  const verification = await db.get(`
+    SELECT vc.*, u.* FROM verification_codes vc
+    JOIN users u ON vc.user_id = u.id
+    WHERE vc.code = ? AND vc.type = 'password_reset' AND vc.used_at IS NULL AND vc.user_id = ?
+  `, [token, tokenData.userId]);
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+  if (!verification) {
+    res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
+    return;
+  }
 
-    logger.info('2FA verified and login completed:', { userId: user.id });
+  // Check if token has expired in database
+  if (DateUtils.isPast(verification.expires_at)) {
+    res.status(400).json({ success: false, message: 'Reset token has expired' });
+    return;
+  }
 
-    res.json({
-      success: true,
-      message: 'Login successful',
-      data: {
-        user: await UserService.getPublicUserData(user.id),
-        accessToken,
-        sessionId,
-        requiresVerification: !user.is_verified
-      }
-    } as ApiResponse);
-  })
-);
+  // Hash new password
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  const now = DateUtils.nowSQLite();
 
-export { router as authRoutes };
+  // Update user password
+  await db.run('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?', [
+    hashedPassword,
+    now,
+    verification.user_id
+  ]);
+
+  // Mark token as used
+  await db.run('UPDATE verification_codes SET used_at = ? WHERE id = ?', [
+    now,
+    verification.id
+  ]);
+
+  // Blacklist all existing tokens for this user for security
+  await AuthUtils.blacklistAllUserTokens(verification.user_id);
+
+  res.json({ success: true, message: 'Password reset successfully' });
+}));
+
+// Validate reset token endpoint
+router.get('/validate-reset-token/:token', asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  const { token } = req.params;
+  const db = getDatabase();
+
+  // Verify JWT token
+  const tokenData = AuthUtils.verifyPasswordResetToken(token);
+  if (!tokenData) {
+    res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
+    return;
+  }
+
+  // Find valid reset token in database
+  const verification = await db.get(`
+    SELECT vc.*, u.email, u.username FROM verification_codes vc
+    JOIN users u ON vc.user_id = u.id
+    WHERE vc.code = ? AND vc.type = 'password_reset' AND vc.used_at IS NULL AND vc.user_id = ?
+  `, [token, tokenData.userId]);
+
+  if (!verification) {
+    res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
+    return;
+  }
+
+  // Check if token has expired in database
+  if (DateUtils.isPast(verification.expires_at)) {
+    res.status(400).json({ success: false, message: 'Reset token has expired' });
+    return;
+  }
+
+  res.json({ 
+    success: true, 
+    data: { 
+      email: verification.email, 
+      username: verification.username 
+    } 
+  });
+}));
+
+router.get('/session', asyncHandler(async (_req: Request, res: Response): Promise<void> => {
+  const secureCookie = process.env['NODE_ENV'] === 'production';
+  res.json({ success: true, secure: secureCookie });
+}));
+
+export default router;

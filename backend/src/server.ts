@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 // Set timezone to Asia/Jakarta globally
-process.env.TZ = 'Asia/Jakarta';
+process.env['TZ'] = 'Asia/Jakarta';
 
 // Simple logger implementation (replace with proper logger later)
 const logger = {
@@ -30,11 +30,13 @@ const logger = {
 
 // Log timezone info for debugging
 logger.info('Timezone Configuration:', {
-  processEnvTZ: process.env.TZ,
+  processEnvTZ: process.env['TZ'],
   systemTime: new Date().toString(),
   jakartaTime: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
   utcTime: new Date().toISOString()
 });
+
+// Environment variables are loaded and ready for use
 
 // Third-party packages
 import cors from 'cors';
@@ -61,7 +63,7 @@ import {
 } from './middleware/security.js';
 
 // Route handlers
-import { authRoutes } from './routes/auth.js';
+import authRoutes from './routes/auth.js';
 import { userRoutes } from './routes/user.js';
 import adminRoutes from './routes/admin.js';
 import { paymentRoutes } from './routes/payment.js';
@@ -74,7 +76,7 @@ import { initializeDatabase } from './database/init.js';
 import { connectRedis } from './config/redis.js';
 
 // Services and utilities
-import { emailService } from './services/emailService.js';
+import { getEmailService } from './services/emailService.js';
 import { DateUtils } from './utils/dateUtils.js';
 // TelegramBotService will be imported dynamically after environment setup
 import { BotMonitor } from './utils/botMonitor.js';
@@ -266,7 +268,7 @@ app.options('*', (req, res) => {
 
 // Debug middleware for CORS
 if (process.env['NODE_ENV'] === 'development') {
-  app.use((req, res, next) => {
+  app.use((req, _res, next) => {
     logger.info(`${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
     if (req.method === 'OPTIONS') {
       logger.info('Preflight request detected');
@@ -307,7 +309,7 @@ app.use(requestLogger);
 app.use(sqlInjectionProtection);
 
 // Additional security headers (CORS is already handled above)
-app.use((req, res, next) => {
+app.use((_req, res, next) => {
   res.header('Cross-Origin-Resource-Policy', 'cross-origin');
   res.header('Cross-Origin-Embedder-Policy', 'unsafe-none');
   next();
@@ -318,14 +320,14 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
   maxAge: '1d',
   etag: false,
   lastModified: false,
-  setHeaders: (res, filePath) => {
+  setHeaders: (res, _filePath) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'public, max-age=86400');
   }
 }));
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   const jakartaTime = DateUtils.formatJakarta(new Date());
   const jakartaSQLite = DateUtils.nowSQLite();
   
@@ -334,7 +336,7 @@ app.get('/health', (req, res) => {
     timestamp: jakartaTime + ' WIB',
     sqlite_format: jakartaSQLite,
     utc_timestamp: new Date().toISOString(),
-    timezone_env: process.env.TZ,
+    timezone_env: process.env['TZ'],
     timezone_offset: DateUtils.getJakartaOffset(),
     uptime: process.uptime(),
     environment: process.env['NODE_ENV'] || 'development',
@@ -366,12 +368,40 @@ async function startServer() {
     await connectRedis();
     logger.info('Redis connected successfully');
 
-    // Test email service connection
-    const emailConnected = await emailService.testConnection();
-    if (emailConnected) {
-      logger.info('Email service connected successfully');
-    } else {
-      logger.warn('Email service connection failed - emails will not work');
+    // Email transporter verification follows
+    // Optionally test email configuration by sending a noop verify
+    try {
+      const user = (process.env['EMAIL_USER'] || '').trim();
+      const host = (process.env['EMAIL_HOST'] || '').trim();
+      const passRaw = process.env['EMAIL_PASS'] || '';
+      const isGmailLike = /gmail\.com$/i.test(host) || /googlemail\.com$/i.test(host) || /@gmail\.com$/i.test(user);
+      const passEffective = isGmailLike ? passRaw.replace(/\s+/g, '') : passRaw.trim();
+      if (!user || !passEffective || !host) {
+        logger.info('Email service not fully configured - skipping transporter verification', {
+          userConfigured: Boolean(user),
+          passConfigured: Boolean(passEffective),
+          hostConfigured: Boolean(host)
+        });
+      } else {
+        await (getEmailService() as any).transporter?.verify?.();
+        logger.info('Email service transporter verified successfully');
+      }
+    } catch (e: any) {
+      logger.warn('Email service verification failed - emails may not work',
+        e instanceof Error
+          ? {
+              name: e.name,
+              message: e.message,
+              code: (e as any)?.code,
+              command: (e as any)?.command,
+              response: (e as any)?.response,
+              responseCode: (e as any)?.responseCode,
+              hostname: (e as any)?.hostname,
+              port: (e as any)?.port,
+              syscall: (e as any)?.syscall,
+            }
+          : { error: String(e) }
+      );
     }
 
     // Resume installation monitoring after server restart
@@ -417,7 +447,7 @@ async function startServer() {
 
     // Start server
     app.listen(PORT, () => {
-      logger.info(`🚀 XME Projects API server running on port ${PORT}`);
+      logger.info(`Server running on port ${PORT}`, { processEnvTZ: process.env['TZ'] });
       logger.info(`📊 Health check available at http://localhost:${PORT}/health`);
       logger.info(`🌍 Environment: ${process.env['NODE_ENV'] || 'development'}`);
     });

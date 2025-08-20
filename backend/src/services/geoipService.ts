@@ -44,8 +44,8 @@ export class GeoIPService {
         throw new Error('GeoIP databases not available');
       }
 
-      const countryResponse = this.countryReader.country(ip);
-      const asnResponse = this.asnReader.asn(ip);
+      const countryResponse = (this.countryReader as any).country(ip);
+      const asnResponse = (this.asnReader as any).asn(ip);
 
       return {
         country: countryResponse.country?.names?.en || 'Unknown',

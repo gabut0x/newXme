@@ -1,6 +1,6 @@
 import { logger } from './logger.js';
 import { TelegramBotService } from '../services/telegramBotService.js';
-import { DateUtils } from './dateUtils.js';
+// DateUtils import removed as it was unused
 
 interface MonitorConfig {
   cleanupInterval: number; // in milliseconds
@@ -83,7 +83,7 @@ class BotMonitor {
       let cleanedCount = 0;
       const dailyStats = stats.metrics.messages.daily;
       
-      for (const [dateStr, data] of Object.entries(dailyStats)) {
+      for (const [dateStr] of Object.entries(dailyStats)) {
         const date = new Date(dateStr);
         if (date < cutoffDate) {
           // Note: In a real implementation, you'd need to modify TelegramBotService
@@ -146,12 +146,12 @@ class BotMonitor {
       
     } catch (error) {
       logger.error('Error during health check:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
       this.logAlert('HEALTH_CHECK_FAILED', 'Failed to perform health check', {
-        error: error.message
+        error: errorMsg
       });
     }
   }
-
   // Log alert
   private logAlert(type: string, message: string, details: any): void {
     logger.warn(`BOT ALERT [${type}]: ${message}`, {

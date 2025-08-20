@@ -67,7 +67,9 @@ import {
   Search,
   KeyRound,
   Smartphone,
-  QrCode
+  QrCode,
+  RotateCcw,
+  Unlock
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -94,6 +96,7 @@ export default function AdminDashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [customWebhookModalOpen, setCustomWebhookModalOpen] = useState(false);
   const [customWebhookUrl, setCustomWebhookUrl] = useState('');
+  const [resetIdentifier, setResetIdentifier] = useState<string>('global');
   
   // Data states
   const [windowsVersions, setWindowsVersions] = useState<WindowsVersion[]>([]);
@@ -918,6 +921,76 @@ export default function AdminDashboardPage() {
         variant: 'destructive',
         title: 'Failed to stop bot',
         description: error.message || 'Failed to stop bot'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResetRateLimit = async () => {
+    try {
+      setIsSubmitting(true);
+      const token = apiService.getAuthToken();
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+
+      const response = await fetch(`${apiBaseUrl}/admin/telegram-bot/rate-limiter/reset`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ identifier: (resetIdentifier || 'global').trim() })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        toast({
+          title: 'Rate limit direset',
+          description: `Identifier: ${(resetIdentifier || 'global').trim()}`
+        });
+      } else {
+        throw new Error(result.message || 'Gagal mereset rate limit');
+      }
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Gagal reset rate limit',
+        description: error.message || 'Terjadi kesalahan saat reset rate limit'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUnblockRateLimit = async () => {
+    try {
+      setIsSubmitting(true);
+      const token = apiService.getAuthToken();
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+
+      const response = await fetch(`${apiBaseUrl}/admin/telegram-bot/rate-limiter/unblock`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ identifier: (resetIdentifier || 'global').trim() })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        toast({
+          title: 'Berhasil unblokir',
+          description: `Identifier: ${(resetIdentifier || 'global').trim()}`
+        });
+      } else {
+        throw new Error(result.message || 'Gagal melakukan unblock');
+      }
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Gagal unblock rate limit',
+        description: error.message || 'Terjadi kesalahan saat unblock rate limit'
       });
     } finally {
       setIsSubmitting(false);
@@ -2457,6 +2530,54 @@ export default function AdminDashboardPage() {
                             )}
                             Stop Bot
                           </Button>
+                        </div>
+
+                        {/* Rate Limit Controls */}
+                        <div className="p-3 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
+                          <h4 className="font-medium text-amber-900 dark:text-amber-100 mb-2 text-sm">
+                            Rate Limit Controls
+                          </h4>
+                          <div className="flex flex-col md:flex-row gap-2 md:items-center">
+                            <div className="flex-1">
+                              <Label htmlFor="resetIdentifier" className="text-xs text-amber-900 dark:text-amber-200">Identifier</Label>
+                              <Input
+                                id="resetIdentifier"
+                                placeholder="global atau userId/chatId"
+                                value={resetIdentifier}
+                                onChange={(e) => setResetIdentifier(e.target.value)}
+                                className="mt-3"
+                              />
+                              <p className="text-[10px] text-amber-700 dark:text-amber-300 mt-1">
+                                Gunakan 'global' untuk mereset semua, atau masukkan userId/chatId tertentu.
+                              </p>
+                            </div>
+                            <div className="flex gap-2 mt-0">
+                              <Button
+                                onClick={handleResetRateLimit}
+                                disabled={isSubmitting}
+                                variant="outline"
+                              >
+                                {isSubmitting ? (
+                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                ) : (
+                                  <RotateCcw className="h-4 w-4 mr-2" />
+                                )}
+                                Reset Limit
+                              </Button>
+                              <Button
+                                onClick={handleUnblockRateLimit}
+                                disabled={isSubmitting}
+                                variant="secondary"
+                              >
+                                {isSubmitting ? (
+                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                ) : (
+                                  <Unlock className="h-4 w-4 mr-2" />
+                                )}
+                                Unblock
+                              </Button>
+                            </div>
+                          </div>
                         </div>
 
                         {/* Bot Information */}

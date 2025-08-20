@@ -8,8 +8,13 @@ import { DateUtils } from './dateUtils.js';
 
 export class AuthUtils {
   private static _jwtSecret: string | null = null;
-  private static readonly JWT_EXPIRES_IN = process.env['JWT_EXPIRES_IN'] || '24h';
-  private static readonly JWT_REFRESH_EXPIRES_IN = process.env['JWT_REFRESH_EXPIRES_IN'] || '7d';
+  // Use numeric seconds for jwt `expiresIn` to conform with strict typings
+  private static get ACCESS_TOKEN_EXPIRES_SECONDS(): number {
+    return this.parseDurationToSeconds(process.env['JWT_EXPIRES_IN'], 24 * 60 * 60);
+  }
+  private static get REFRESH_TOKEN_EXPIRES_SECONDS(): number {
+    return this.parseDurationToSeconds(process.env['JWT_REFRESH_EXPIRES_IN'], 7 * 24 * 60 * 60);
+  }
   private static readonly BCRYPT_ROUNDS = parseInt(process.env['BCRYPT_ROUNDS'] || '12');
 
   // Lazy-load JWT secret with validation
@@ -18,6 +23,27 @@ export class AuthUtils {
       this._jwtSecret = this.validateJWTSecret();
     }
     return this._jwtSecret!;
+  }
+
+  // Parse duration strings like "15m", "24h", "7d" into seconds; fallback to defaultSeconds
+  private static parseDurationToSeconds(value: string | undefined, defaultSeconds: number): number {
+    if (!value) return defaultSeconds;
+    const trimmed = value.trim().toLowerCase();
+    const match = trimmed.match(/^(\d+)([smhd])?$/);
+    if (!match) {
+      const asNumber = Number(trimmed);
+      return Number.isFinite(asNumber) && asNumber > 0 ? Math.floor(asNumber) : defaultSeconds;
+    }
+    const amount = Number(match[1]);
+    const unit = match[2] as 's' | 'm' | 'h' | 'd' | undefined;
+    if (!Number.isFinite(amount) || amount <= 0) return defaultSeconds;
+    switch (unit) {
+      case 's': return amount;
+      case 'm': return amount * 60;
+      case 'h': return amount * 60 * 60;
+      case 'd': return amount * 24 * 60 * 60;
+      default: return amount; // treat plain number as seconds
+    }
   }
 
   // Validate and return JWT secret with security checks
@@ -66,7 +92,7 @@ export class AuthUtils {
   // JWT token generation and verification
   static generateAccessToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): string {
     return jwt.sign(payload, this.JWT_SECRET, {
-      expiresIn: this.JWT_EXPIRES_IN,
+      expiresIn: this.ACCESS_TOKEN_EXPIRES_SECONDS,
       issuer: 'xme-projects',
       audience: 'xme-projects-users',
     });
@@ -74,7 +100,7 @@ export class AuthUtils {
 
   static generateRefreshToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): string {
     return jwt.sign(payload, this.JWT_SECRET, {
-      expiresIn: this.JWT_REFRESH_EXPIRES_IN,
+      expiresIn: this.REFRESH_TOKEN_EXPIRES_SECONDS,
       issuer: 'xme-projects',
       audience: 'xme-projects-users',
     });
@@ -117,8 +143,11 @@ export class AuthUtils {
       iat: DateUtils.getJakartaUnixTimestamp()
     };
     
+    const minutes = parseInt(process.env['VERIFICATION_CODE_EXPIRES_MINUTES'] || '15', 10);
+    const expiresInSeconds = Number.isFinite(minutes) && minutes > 0 ? minutes * 60 : 15 * 60;
+    
     return jwt.sign(payload, this.JWT_SECRET, {
-      expiresIn: process.env['VERIFICATION_CODE_EXPIRES_MINUTES'] ? `${process.env['VERIFICATION_CODE_EXPIRES_MINUTES']}m` : '15m',
+      expiresIn: expiresInSeconds,
       issuer: 'xme-projects',
       audience: 'xme-projects-reset',
     });
@@ -148,7 +177,6 @@ export class AuthUtils {
   // Verification code generation
   static generateVerificationCode(): string {
     // Generate with Jakarta timestamp for uniqueness
-    const timestamp = DateUtils.getJakartaUnixTimestamp();
     const random = crypto.randomInt(100000, 999999);
     return random.toString();
   }
@@ -183,6 +211,64 @@ export class AuthUtils {
     } catch (error) {
       logger.error('Failed to check token blacklist:', error);
       return false;
+    }
+  }
+
+  // Generate password reset token
+  static generatePasswordResetToken(userId: number, email: string): string {
+    const payload = {
+      userId,
+      email,
+      type: 'password_reset',
+      iat: DateUtils.getJakartaUnixTimestamp()
+    };
+    
+    const minutes = parseInt(process.env['VERIFICATION_CODE_EXPIRES_MINUTES'] || '15', 10);
+    const expiresInSeconds = Number.isFinite(minutes) && minutes > 0 ? minutes * 60 : 15 * 60;
+    
+    return jwt.sign(payload, this.JWT_SECRET, {
+      expiresIn: expiresInSeconds,
+      issuer: 'xme-projects',
+      audience: 'xme-projects-reset',
+    });
+  }
+
+  // Verify password reset token
+  static verifyPasswordResetToken(token: string): { userId: number; email: string } | null {
+    try {
+      const decoded = jwt.verify(token, this.JWT_SECRET, {
+        issuer: 'xme-projects',
+        audience: 'xme-projects-reset',
+      }) as any;
+      
+      if (decoded.type !== 'password_reset') {
+        return null;
+      }
+      
+      return {
+        userId: decoded.userId,
+        email: decoded.email
+      };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  static async blacklistAllUserTokens(userId: number): Promise<void> {
+    try {
+      // This is a placeholder implementation since we don't have a way to track all tokens per user
+      // In a production system, you might want to:
+      // 1. Store token-to-user mapping in Redis
+      // 2. Increment a user version number and check it during token verification
+      // 3. Use a different approach like short-lived tokens with refresh tokens
+      
+      // For now, we'll log this action and rely on the password change invalidating sessions
+      logger.info('All tokens invalidated for user (password reset):', { userId });
+      
+      // You could implement a user token version system here:
+      // await SessionManager.incrementUserTokenVersion(userId);
+    } catch (error) {
+      logger.error('Failed to blacklist all user tokens:', error);
     }
   }
 

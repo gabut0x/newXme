@@ -1,9 +1,9 @@
 import { getDatabase } from '../database/init.js';
 import { AuthUtils } from '../utils/auth.js';
-import { User, PublicUser, VerificationCode } from '../types/user.js';
+import { User, PublicUser } from '../types/user.js';
 import { logger } from '../utils/logger.js';
 import { DateUtils } from '../utils/dateUtils.js';
-import { BadRequestError, ConflictError, NotFoundError } from '../middleware/errorHandler.js';
+import { ConflictError, NotFoundError } from '../middleware/errorHandler.js';
 
 export class UserService {
   /**
@@ -161,7 +161,7 @@ export class UserService {
 
       // Generate new code
       const code = AuthUtils.generateVerificationCode();
-      const expiresAt = DateUtils.addMinutesJakarta(parseInt(process.env.VERIFICATION_CODE_EXPIRES_MINUTES || '15'));
+      const expiresAt = DateUtils.addMinutesJakarta(parseInt(process.env['VERIFICATION_CODE_EXPIRES_MINUTES'] || '15'));
 
       await db.run(`
         INSERT INTO verification_codes (user_id, code, type, expires_at, created_at)
@@ -275,7 +275,7 @@ export class UserService {
         quota: user.quota,
         created_at: user.created_at,
         last_login: user.last_login,
-        profile
+        ...(profile ? { profile } : {})
       };
     } catch (error) {
       logger.error('Failed to get public user data:', error);

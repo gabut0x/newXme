@@ -67,10 +67,10 @@ export async function checkAdminStatus(userId: number): Promise<boolean> {
     if (!Number.isInteger(userId) || userId <= 0) return false;
 
     const db = getDatabase();
-    const user = await db.get<{ admin: number }>(
+    const user = await db.get(
       'SELECT admin FROM users WHERE id = ? AND is_active = 1',
       [userId]
-    );
+    ) as { admin: number } | undefined;
 
     return user?.admin === 1;
   } catch (error) {

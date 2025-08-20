@@ -76,7 +76,14 @@ export function TermsOfServiceModal({ children }: TermsOfServiceModalProps) {
             </section>
 
             <section>
-              <h3 className="font-semibold text-lg mb-3">6. Prohibited Activities</h3>
+              <h3 className="font-semibold text-lg mb-3">6. Refund Policy</h3>
+              <p className="text-muted-foreground leading-relaxed">
+                If a user experiences failure or errors during the installation process, the user is entitled to receive a refund in the form of quota equivalent to the number of failed or problematic processes.
+              </p>
+            </section>
+
+            <section>
+              <h3 className="font-semibold text-lg mb-3">7. Prohibited Activities</h3>
               <p className="text-muted-foreground leading-relaxed mb-2">
                 Users agree not to use the service for:
               </p>
@@ -90,42 +97,42 @@ export function TermsOfServiceModal({ children }: TermsOfServiceModalProps) {
             </section>
 
             <section>
-              <h3 className="font-semibold text-lg mb-3">7. Privacy Policy</h3>
+              <h3 className="font-semibold text-lg mb-3">8. Privacy Policy</h3>
               <p className="text-muted-foreground leading-relaxed">
                 Your privacy is important to us. We collect and use information in accordance with our Privacy Policy. By using our service, you consent to the collection and use of information as outlined in our Privacy Policy.
               </p>
             </section>
 
             <section>
-              <h3 className="font-semibold text-lg mb-3">8. Service Availability</h3>
+              <h3 className="font-semibold text-lg mb-3">9. Service Availability</h3>
               <p className="text-muted-foreground leading-relaxed">
                 We strive to maintain service availability but cannot guarantee 100% uptime. Scheduled maintenance will be announced in advance when possible. We are not liable for any damages resulting from service interruptions.
               </p>
             </section>
 
             <section>
-              <h3 className="font-semibold text-lg mb-3">9. Limitation of Liability</h3>
+              <h3 className="font-semibold text-lg mb-3">10. Limitation of Liability</h3>
               <p className="text-muted-foreground leading-relaxed">
                 In no event shall XME Projects or its suppliers be liable for any damages (including, without limitation, damages for loss of data or profit, or due to business interruption) arising out of the use or inability to use the service.
               </p>
             </section>
 
             <section>
-              <h3 className="font-semibold text-lg mb-3">10. Termination</h3>
+              <h3 className="font-semibold text-lg mb-3">11. Termination</h3>
               <p className="text-muted-foreground leading-relaxed">
                 We may terminate or suspend your account and access to the service at any time, without prior notice or liability, for any reason including breach of these Terms of Service.
               </p>
             </section>
 
             <section>
-              <h3 className="font-semibold text-lg mb-3">11. Changes to Terms</h3>
+              <h3 className="font-semibold text-lg mb-3">12. Changes to Terms</h3>
               <p className="text-muted-foreground leading-relaxed">
                 We reserve the right to modify these terms at any time. Changes will be effective immediately upon posting. Your continued use of the service constitutes acceptance of the modified terms.
               </p>
             </section>
 
             <section>
-              <h3 className="font-semibold text-lg mb-3">12. Contact Information</h3>
+              <h3 className="font-semibold text-lg mb-3">13. Contact Information</h3>
               <p className="text-muted-foreground leading-relaxed">
                 If you have any questions about these Terms of Service, please contact us through our support channels or email us at xme.noreply@gmail.com.
               </p>

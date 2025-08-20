@@ -20,10 +20,10 @@ const storage = multer.diskStorage({
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const fileExtension = path.extname(file.originalname).toLowerCase();
     
-    // Sanitize original filename
-    const sanitizedName = file.originalname
-      .replace(/[^a-zA-Z0-9.-]/g, '_') // Replace special chars with underscore
-      .substring(0, 50); // Limit length
+    // No need to keep sanitizedName since it's unused
+    // const sanitizedName = file.originalname
+    //   .replace(/[^a-zA-Z0-9.-]/g, '_')
+    //   .substring(0, 50);
     
     cb(null, 'product-' + uniqueSuffix + fileExtension);
   }

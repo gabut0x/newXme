@@ -44,7 +44,7 @@ interface AuthContextType {
   register: (username: string, email: string, password: string, confirmPassword: string, recaptchaToken: string) => Promise<void>;
   logout: () => Promise<void>;
   verifyEmail: (code: string) => Promise<void>;
-  resendVerification: () => Promise<void>;
+  resendVerification: (email?: string) => Promise<void>;
   forgotPassword: (email: string, recaptchaToken: string) => Promise<void>;
   resetPassword: (token: string, newPassword: string, confirmPassword: string) => Promise<void>;
   updateProfile: (data: any) => Promise<void>;
@@ -236,8 +236,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
       dispatch({ type: 'AUTH_START' });
       
       const response = await apiService.register({ username, email, password, confirmPassword, recaptchaToken });
-      if (response.data.data?.user && response.data.data?.accessToken) {
-        const { user, accessToken } = response.data.data;
+      const apiRes = response.data;
+      const data = apiRes?.data as any;
+
+      if (apiRes?.success && (!data || data?.requiresVerification || (!data?.user && !data?.accessToken))) {
+        // Persist email for resend verification
+        try { localStorage.setItem('pendingVerificationEmail', email); } catch {}
+        // Ensure loading state is cleared without authenticating
+        dispatch({ type: 'AUTH_LOGOUT' });
+        return;
+      }
+
+      if (data?.user && data?.accessToken) {
+        const { user, accessToken } = data;
         apiService.setAuthToken(accessToken);
         dispatch({ type: 'AUTH_SUCCESS', payload: user });
       } else {
@@ -268,8 +279,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
       dispatch({ type: 'AUTH_START' });
       
       const response = await apiService.verifyEmail({ code });
-      if (response.data.data?.user) {
-        dispatch({ type: 'AUTH_SUCCESS', payload: response.data.data.user });
+      const data = response.data.data as any;
+      if (data?.user && data?.accessToken) {
+        // Clear pending email upon successful verification
+        try { localStorage.removeItem('pendingVerificationEmail'); } catch {}
+        apiService.setAuthToken(data.accessToken);
+        dispatch({ type: 'AUTH_SUCCESS', payload: data.user });
+      } else if (data?.user) {
+        // Fallback: if backend didn't return token for some reason, still mark success but no token
+        try { localStorage.removeItem('pendingVerificationEmail'); } catch {}
+        dispatch({ type: 'AUTH_SUCCESS', payload: data.user });
       } else {
         throw new Error('Invalid response from server');
       }
@@ -281,9 +300,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   // Resend verification function
-  const resendVerification = useCallback(async () => {
+  const resendVerification = useCallback(async (emailArg?: string) => {
     try {
-      await apiService.resendVerification();
+      const email = emailArg || (() => { try { return localStorage.getItem('pendingVerificationEmail') || undefined; } catch { return undefined; } })();
+      await apiService.resendVerification(email);
     } catch (error: any) {
       const message = error.response?.data?.message || 'Failed to resend verification email';
       throw new Error(message);

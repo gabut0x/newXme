@@ -121,14 +121,17 @@ export interface User {
   username: string
   email: string
   password_hash: string
-  is_admin: boolean
+  is_verified: boolean
   is_active: boolean
+  admin: number // 1 = admin, 0 = non-admin
   quota: number | null
+  telegram: string | null
   telegram_notifications: boolean | null
-  telegram_user_id: string | null
+  telegram_user_id: number | null
   telegram_display_name: string | null
   created_at: string
   updated_at: string
+  last_login?: string | null
   // 2FA fields
   two_factor_enabled: boolean | 0 | 1 | null
   totp_secret: string | null
@@ -180,18 +183,34 @@ export interface AuditLog {
   created_at: string;
 }
 
+// Public user profile (safe fields only)
+export type PublicUserProfile = {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  avatar_url?: string;
+  timezone: string;
+  language: string;
+  created_at: string;
+};
+
 // Public user interface (without sensitive data)
 export interface PublicUser {
   id: number
   username: string
   email: string
-  is_admin: boolean
-  is_active: boolean
+  is_verified: boolean
+  admin: number // 1 = admin, 0 = non-admin
+  telegram?: string | null
   quota: number | null
-  telegram_notifications: boolean | null
-  telegram_user_id: string | null
-  telegram_display_name: string | null
-  // 2FA safe exposure
+  created_at: string
+  last_login?: string | null
+  profile?: PublicUserProfile
+  // Optional additional fields if available
+  telegram_notifications?: boolean | null
+  telegram_user_id?: number | null
+  telegram_display_name?: string | null
   two_factor_enabled?: boolean | 0 | 1 | null
 }
 

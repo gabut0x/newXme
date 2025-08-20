@@ -112,10 +112,10 @@ export class ApiService {
   async getEnabledPaymentMethods() {
     try {
       // Use the imported tripayService instance
-      const paymentMethods = await tripayService.getPaymentChannels();
+      const paymentMethods = await tripayService.getPaymentChannels() as Array<{ active: boolean; [key: string]: any }>;
       
       // Filter only enabled methods
-      return paymentMethods.filter(method => method.active);
+      return paymentMethods.filter((method) => method.active);
     } catch (error) {
       logger.error('Error getting payment methods:', error);
       throw error;
@@ -179,7 +179,7 @@ export class ApiService {
         calculation.total,
         paymentMethod,
         transaction.reference,
-        DateUtils.getCurrentTimestamp()
+        DateUtils.nowSQLite()
       ]);
 
       return {
@@ -229,7 +229,7 @@ export class ApiService {
       logger.error('Error creating topup request:', error);
       return {
         success: false,
-        message: error.message || 'Failed to create topup request'
+        message: error instanceof Error ? error.message : 'Failed to create topup request'
       };
     }
   }
@@ -253,7 +253,7 @@ export class ApiService {
       `;
       
       const db = await this.initializeDb();
-      const timestamp = DateUtils.getCurrentTimestamp();
+      const timestamp = DateUtils.nowSQLite();
       const result = await db.run(query, [
         userId,
         windowsVersion,
@@ -320,7 +320,7 @@ export class ApiService {
       const { InstallService } = await import('./installService.js');
       
       // Use InstallService which includes monitoring integration
-      const result = await InstallService.createInstallation(
+      const result = await InstallService.processInstallation(
         userId,
         data.vps_ip || '',
         data.vps_password || '',

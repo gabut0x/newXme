@@ -68,21 +68,19 @@ export default function VerifyEmailPage() {
   };
 
   const handleResendVerification = async () => {
-    setIsResending(true);
     try {
-      await resendVerification();
+      const email = (() => { try { return localStorage.getItem('pendingVerificationEmail'); } catch { return null; } })();
+      await resendVerification(email || undefined);
       toast({
         title: 'Verification email sent',
         description: 'Please check your email for the new verification code.',
       });
     } catch (error: any) {
       toast({
+        title: 'Failed to resend verification',
+        description: error.message || 'Please try again later.',
         variant: 'destructive',
-        title: 'Failed to resend email',
-        description: error.message || 'Please try again.',
       });
-    } finally {
-      setIsResending(false);
     }
   };
 

@@ -271,7 +271,7 @@ export default function ResetPasswordPage() {
                 </CardHeader>
                 
                 <CardContent className="space-y-6">
-                  <div className="text-center space-y-4">
+                  <div className="text-center space-y-4 mb-2">
                     <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
                       <p className="text-sm text-green-800 dark:text-green-300">
                         You can now sign in to your account using your new password.

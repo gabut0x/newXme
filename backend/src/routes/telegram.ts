@@ -17,7 +17,7 @@ const router = express.Router();
 router.get('/bot-info',
   authenticateToken,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
+  asyncHandler(async (_req: Request, res: Response) => {
     try {
       const botInfo = await TelegramBotService.getBotInfo();
       
@@ -46,7 +46,7 @@ router.get('/bot-info',
 router.post('/set-commands',
   authenticateToken,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
+  asyncHandler(async (_req: Request, res: Response) => {
     try {
       const success = await TelegramBotService.setMyCommands();
       
@@ -81,7 +81,7 @@ router.post('/set-commands',
 router.get('/commands',
   authenticateToken,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
+  asyncHandler(async (_req: Request, res: Response) => {
     try {
       const botCommands = await TelegramBotService.getMyCommands();
       
@@ -112,7 +112,7 @@ router.get('/commands',
 router.post('/setup',
   authenticateToken,
   requireAdmin,
-  asyncHandler(async (req: Request, res: Response) => {
+  asyncHandler(async (_req: Request, res: Response) => {
     try {
       // Get bot info first
       const botInfo = await TelegramBotService.getBotInfo();

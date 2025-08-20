@@ -1,4 +1,4 @@
-import { createClient, RedisClientType } from 'redis';
+import { createClient, type RedisClientType } from 'redis';
 import { logger } from '../utils/logger.js';
 import { DateUtils } from '../utils/dateUtils.js';
 
@@ -6,14 +6,21 @@ let redisClient: RedisClientType | null = null;
 
 export async function connectRedis(): Promise<RedisClientType> {
   try {
-    const client = createClient({
+    const password = process.env['REDIS_PASSWORD'];
+    const baseOptions = {
       socket: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379'),
+        host: process.env['REDIS_HOST'] || 'localhost',
+        port: parseInt(process.env['REDIS_PORT'] || '6379'),
       },
-      password: process.env.REDIS_PASSWORD || undefined,
-      database: parseInt(process.env.REDIS_DB || '0'),
-    });
+      database: parseInt(process.env['REDIS_DB'] || '0'),
+    } as const;
+
+    const options = {
+      ...baseOptions,
+      ...(password ? { password } : {}),
+    };
+
+    const client: RedisClientType = createClient(options as any);
 
     client.on('error', (err) => {
       logger.error('Redis Client Error:', err);
@@ -124,9 +131,13 @@ export class SessionManager {
     
     const sessionIds = await client.sMembers(userSessionsKey);
     if (sessionIds.length > 0) {
+      const pipeline = client.multi();
       const sessionKeys = sessionIds.map(id => `${this.SESSION_PREFIX}${id}`);
-      await client.del(sessionKeys);
-      await client.del(userSessionsKey);
+      for (const key of sessionKeys) {
+        pipeline.del(key);
+      }
+      pipeline.del(userSessionsKey);
+      await pipeline.exec();
     }
   }
   
@@ -197,63 +208,63 @@ export class RateLimiter {
       return {
         allowed: true,
         remaining: maxRequests - 1,
-        resetTime: now + (windowSeconds * 1000)
+        resetTime: now + windowSeconds * 1000
       };
     }
-    
-    const count = parseInt(current);
+
+    const count = parseInt(current, 10);
     if (count >= maxRequests) {
       const ttl = await client.ttl(rateLimitKey);
       return {
         allowed: false,
         remaining: 0,
-        resetTime: now + (ttl * 1000)
+        resetTime: now + (ttl > 0 ? ttl * 1000 : windowSeconds * 1000)
       };
     }
-    
+
     await client.incr(rateLimitKey);
     const ttl = await client.ttl(rateLimitKey);
-    
     return {
       allowed: true,
-      remaining: maxRequests - count - 1,
-      resetTime: now + (ttl * 1000)
+      remaining: Math.max(0, maxRequests - (count + 1)),
+      resetTime: now + (ttl > 0 ? ttl * 1000 : windowSeconds * 1000)
     };
   }
 }
 
-// Cache functions
+// Cache manager functions
 export class CacheManager {
   private static readonly CACHE_PREFIX = 'cache:';
-  
+
   static async set(key: string, value: any, expirationSeconds: number = 3600): Promise<void> {
     const client = getRedisClient();
-    const cacheKey = `${this.CACHE_PREFIX}${key}`;
-    
-    await client.setEx(cacheKey, expirationSeconds, JSON.stringify(value));
+    const namespacedKey = `${this.CACHE_PREFIX}${key}`;
+    await client.setEx(namespacedKey, expirationSeconds, JSON.stringify(value));
   }
-  
+
   static async get(key: string): Promise<any | null> {
     const client = getRedisClient();
-    const cacheKey = `${this.CACHE_PREFIX}${key}`;
-    
-    const value = await client.get(cacheKey);
-    return value ? JSON.parse(value) : null;
+    const namespacedKey = `${this.CACHE_PREFIX}${key}`;
+    const data = await client.get(namespacedKey);
+    return data ? JSON.parse(data) : null;
   }
-  
+
   static async delete(key: string): Promise<void> {
     const client = getRedisClient();
-    const cacheKey = `${this.CACHE_PREFIX}${key}`;
-    
-    await client.del(cacheKey);
+    const namespacedKey = `${this.CACHE_PREFIX}${key}`;
+    await client.del(namespacedKey);
   }
-  
+
   static async deletePattern(pattern: string): Promise<void> {
     const client = getRedisClient();
-    const keys = await client.keys(`${this.CACHE_PREFIX}${pattern}`);
-    
+    const namespacedPattern = `${this.CACHE_PREFIX}${pattern}`;
+    const keys = await client.keys(namespacedPattern);
     if (keys.length > 0) {
-      await client.del(keys);
+      const pipeline = client.multi();
+      for (const k of keys) {
+        pipeline.del(k);
+      }
+      await pipeline.exec();
     }
   }
 }

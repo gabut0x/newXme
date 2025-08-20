@@ -90,9 +90,9 @@ function App() {
 
               {/* Protected Routes */}
               <Route path="/verify-email" element={
-                <ProtectedRoute>
+                <PublicRoute>
                   <VerifyEmailPage />
-                </ProtectedRoute>
+                </PublicRoute>
               } />
               <Route path="/dashboard" element={
                 <ProtectedRoute>

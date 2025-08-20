@@ -291,25 +291,63 @@ class ApiService {
     this.api.interceptors.response.use(
       (response) => response,
       async (error) => {
-        const originalRequest = error.config;
+        const originalRequest = error.config || {};
+        const requestUrl: string = originalRequest.url || '';
+        const isAuthEndpoint = [
+          '/auth/login',
+          '/auth/register',
+          '/auth/verify-email',
+          '/auth/resend-verification',
+          '/auth/forgot-password',
+          '/auth/2fa/verify',
+          '/auth/refresh',
+        ].some((p) => requestUrl.includes(p));
+
+        // If the error is from an auth endpoint (e.g., invalid login),
+        // do NOT attempt refresh and do NOT force logout/redirect
+        if (error.response?.status === 401 && isAuthEndpoint) {
+          return Promise.reject(error);
+        }
 
         if (error.response?.status === 401 && !originalRequest._retry) {
-          originalRequest._retry = true;
+          (originalRequest as any)._retry = true;
+
+          // Only attempt refresh if we currently have an access token
+          const existingToken = localStorage.getItem('accessToken');
+          if (!existingToken) {
+            // No token to refresh; if not on login page, optionally redirect
+            if (window.location.pathname !== '/login') {
+              // Let the app-level route guards handle navigation
+            }
+            return Promise.reject(error);
+          }
+
+          // Avoid refresh loops if the failing request is itself the refresh call
+          if (requestUrl.includes('/auth/refresh')) {
+            return Promise.reject(error);
+          }
 
           try {
             const response = await this.refreshToken();
             if (response.data.data?.accessToken) {
               const { accessToken } = response.data.data;
               localStorage.setItem('accessToken', accessToken);
+              originalRequest.headers = originalRequest.headers || {};
               originalRequest.headers.Authorization = `Bearer ${accessToken}`;
               return this.api(originalRequest);
             } else {
               throw new Error('Invalid refresh response');
             }
           } catch (refreshError) {
-            // Refresh failed, redirect to login
-            this.logout();
-            window.location.href = '/login';
+            // Refresh failed: only clear token if it exists, and avoid redirect loop on login page
+            const hadToken = localStorage.getItem('accessToken');
+            if (hadToken) {
+              try { await this.logout(); } catch {}
+              localStorage.removeItem('accessToken');
+            }
+            if (window.location.pathname !== '/login') {
+              window.location.href = '/login';
+            }
             return Promise.reject(refreshError);
           }
         }
@@ -367,7 +405,7 @@ class ApiService {
     });
   }
 
-  async verifyEmail(data: VerifyEmailRequest): Promise<AxiosResponse<ApiResponse<{ user: User }>>> {
+  async verifyEmail(data: VerifyEmailRequest): Promise<AxiosResponse<ApiResponse<{ user: User; accessToken: string }>>> {
     return this.api.post('/auth/verify-email', data, {
       headers: {
         'Content-Type': 'application/json'
@@ -375,8 +413,8 @@ class ApiService {
     });
   }
 
-  async resendVerification(): Promise<AxiosResponse<ApiResponse>> {
-    return this.api.post('/auth/resend-verification', {}, {
+  async resendVerification(email?: string): Promise<AxiosResponse<ApiResponse>> {
+    return this.api.post('/auth/resend-verification', email ? { email } : {}, {
       headers: {
         'Content-Type': 'application/json'
       }

@@ -90,6 +90,11 @@ export class RateLimiter {
     return entry?.resetTime || null;
   }
 
+  public getBlockUntil(identifier: string): number | null {
+    const entry = this.limits.get(identifier);
+    return entry?.blockUntil || null;
+  }
+
   public isBlocked(identifier: string): boolean {
     const entry = this.limits.get(identifier);
     if (!entry?.blocked) return false;
@@ -98,7 +103,7 @@ export class RateLimiter {
     if (entry.blockUntil && now >= entry.blockUntil) {
       // Unblock if block period expired
       entry.blocked = false;
-      entry.blockUntil = undefined;
+      delete entry.blockUntil;
       return false;
     }
     
@@ -109,7 +114,7 @@ export class RateLimiter {
     const entry = this.limits.get(identifier);
     if (entry) {
       entry.blocked = false;
-      entry.blockUntil = undefined;
+      delete entry.blockUntil;
       this.logger.info(`Manually unblocked ${identifier}`);
     }
   }
@@ -140,7 +145,7 @@ export class RateLimiter {
       // Remove entries where block period has expired
       else if (entry.blocked && entry.blockUntil && now >= entry.blockUntil) {
         entry.blocked = false;
-        entry.blockUntil = undefined;
+        delete entry.blockUntil;
       }
     }
     
@@ -162,42 +167,42 @@ export const RATE_LIMITS = {
   // General bot commands (per user)
   BOT_COMMANDS: {
     windowMs: 60 * 1000, // 1 minute
-    maxRequests: 10, // 10 commands per minute
-    blockDurationMs: 5 * 60 * 1000 // Block for 5 minutes
+    maxRequests: 40, // increased to 40 per minute as requested
+    blockDurationMs: 1 * 60 * 1000 // 1 minute block
   },
   
   // Stricter limits for unconnected users
   UNCONNECTED_USER_COMMANDS: {
     windowMs: 60 * 1000, // 1 minute
-    maxRequests: 3, // Only 3 commands per minute for unconnected users
-    blockDurationMs: 10 * 60 * 1000 // Block for 10 minutes
+    maxRequests: 5, // was 3: allow a few more
+    blockDurationMs: 5 * 60 * 1000 // was 10 min: reduce block to 5 minutes
   },
   
   // Very strict limits for repeated unconnected attempts
   UNCONNECTED_SPAM_PROTECTION: {
     windowMs: 5 * 60 * 1000, // 5 minutes
-    maxRequests: 5, // Only 5 commands per 5 minutes
-    blockDurationMs: 30 * 60 * 1000 // Block for 30 minutes
+    maxRequests: 7, // was 5: slightly more tolerant
+    blockDurationMs: 10 * 60 * 1000 // was 30 min: reduce block to 10 minutes
   },
   
   // Topup commands (per user) - more restrictive
   TOPUP_COMMANDS: {
     windowMs: 60 * 1000, // 1 minute
-    maxRequests: 3, // 3 topup attempts per minute
-    blockDurationMs: 10 * 60 * 1000 // Block for 10 minutes
+    maxRequests: 5, // was 3: allow a bit more
+    blockDurationMs: 3 * 60 * 1000 // was 10 min: reduce block to 3 minutes
   },
   
-  // Install commands (per user) - very restrictive
+  // Install commands (per user) - previously very restrictive
   INSTALL_COMMANDS: {
-    windowMs: 5 * 60 * 1000, // 5 minutes
-    maxRequests: 2, // 2 install attempts per 5 minutes
-    blockDurationMs: 30 * 60 * 1000 // Block for 30 minutes
+    windowMs: 2 * 60 * 1000, // was 5 min: shorter window
+    maxRequests: 4, // was 2: allow more attempts per window
+    blockDurationMs: 5 * 60 * 1000 // was 30 min: reduce block to 5 minutes
   },
   
-  // Global rate limit (all users combined) - more restrictive
+  // Global rate limit (all users combined) - relax a bit
   GLOBAL_COMMANDS: {
     windowMs: 60 * 1000, // 1 minute
-    maxRequests: 80, // Reduced from 100 to 80 total commands per minute
-    blockDurationMs: 3 * 60 * 1000 // Increased block time to 3 minutes
+    maxRequests: 200, // was 80: increase global throughput
+    blockDurationMs: 1 * 60 * 1000 // was 3 min: reduce block to 1 minute
   }
 };

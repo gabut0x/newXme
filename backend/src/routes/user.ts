@@ -12,11 +12,11 @@ import {
   requireVerifiedUser,
   validateRequest,
   asyncHandler,
-  validateNumericId,
+  // validateNumericId, // unused
   sqlInjectionProtection
 } from '../middleware/auth.js';
 import { auditLogger } from '../middleware/security.js';
-import { NotFoundError, BadRequestError } from '../middleware/errorHandler.js';
+import { NotFoundError } from '../middleware/errorHandler.js';
 
 // Types and schemas
 import { updateProfileSchema, installDataSchema, ApiResponse } from '../types/user.js';
@@ -29,6 +29,7 @@ import { InstallService } from '../services/installService.js';
 import { DatabaseSecurity } from '../utils/dbSecurity.js';
 import { DateUtils } from '../utils/dateUtils.js';
 import { logger } from '../utils/logger.js';
+
 
 const router = express.Router();
 
@@ -539,7 +540,7 @@ router.get('/dashboard',
 // Get Windows versions for install form
 router.get('/windows-versions',
   authenticateToken,
-  asyncHandler(async (req: Request, res: Response) => {
+  asyncHandler(async (_req: Request, res: Response) => {
     const db = getDatabase();
     const versions = await db.all('SELECT * FROM windows_versions ORDER BY name');
     
@@ -724,7 +725,7 @@ router.post('/topup',
         customer_phone: '',
         order_items: [{
           sku: product ? `PRODUCT-${product.id}` : 'QUOTA-INSTALL',
-          name: product ? product.name : 'Quota Install',
+          name: product ? product.name : `${quantity} Quota Install`,
           price: Math.round(finalAmount),
           quantity: 1,
           product_url: process.env['FRONTEND_URL'] || 'https://localhost:3000',
@@ -1103,7 +1104,7 @@ router.delete('/account',
 router.get('/payment-methods/enabled', 
   authenticateToken,
   requireVerifiedUser,
-  asyncHandler(async (req: Request, res: Response) => {
+  asyncHandler(async (_req: Request, res: Response) => {
     try {
       const db = getDatabase();
       
@@ -1366,5 +1367,7 @@ router.post('/debug/test-stream-notification',
     } as ApiResponse);
   })
 );
+
+
 
 export { router as userRoutes };
